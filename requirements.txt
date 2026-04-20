@@ -9,3 +9,4 @@ pydantic>=2.0
 PyOpenGL>=3.1.7
 PyOpenGL_accelerate>=3.1.7
 glfw>=2.6.0
+modal
