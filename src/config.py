@@ -4,10 +4,8 @@ Tune all sensitivity and threshold values here without touching logic files.
 """
 from __future__ import annotations
 from pydantic import BaseModel, Field
-import pyautogui
-
-# Get actual screen resolution at runtime
-SCREEN_W, SCREEN_H = pyautogui.size()
+# Default desktop size; mouse controller uses pyautogui for actual movement.
+SCREEN_W, SCREEN_H = 1920, 1080
 
 
 class CameraConfig(BaseModel):
@@ -25,14 +23,13 @@ class GestureConfig(BaseModel):
         0.15, description="Fractional margin to ignore at each edge (0.0–0.4)."
     )
     smoothing: float = Field(
-        0.25,
-        description=(
-            "Exponential smoothing factor for cursor movement. "
-            "Lower = smoother but laggier (0.05–0.5)."
-        ),
+        0.15, description="EMA smoothing alpha for cursor (lower = more lag)."
+    )
+    movement_factor: float = Field(
+        2.5, description="Multiplier for hand movement vs screen cursor."
     )
     move_threshold_px: float = Field(
-        4.0,
+        2.0,
         description="Minimum pixel delta before moving cursor (reduces micro-jitter).",
     )
 
@@ -43,11 +40,11 @@ class GestureConfig(BaseModel):
     )
     # Thumb+Index touch = left click
     thumb_index_click: float = Field(
-        0.05, description="Max thumb-index tip dist for left click."
+        0.03, description="Max thumb-index tip dist for left click."
     )
     # Thumb+Middle touch = right click
     thumb_middle_click: float = Field(
-        0.05, description="Max thumb-middle tip dist for right click."
+        0.03, description="Max thumb-middle tip dist for right click."
     )
 
     # --- Pinch / Click (kept for builder thumb-pinch move) ---
@@ -72,11 +69,11 @@ class GestureConfig(BaseModel):
     # --- Scroll ---
     # Two fingers (index + middle) extended, wrist moves up/down
     scroll_threshold: float = Field(
-        0.008,
+        0.02,
         description="Minimum normalised vertical delta to trigger a scroll tick.",
     )
     scroll_speed: int = Field(
-        5, description="pyautogui scroll units per tick (positive = up)."
+        12, description="pyautogui scroll units per tick (positive = up)."
     )
     scroll_cooldown_frames: int = Field(
         2, description="Frames between scroll ticks (controls scroll speed)."
@@ -90,6 +87,13 @@ class OverlayConfig(BaseModel):
     color_active: tuple[int, int, int] = (0, 255, 180)
     color_idle: tuple[int, int, int] = (200, 200, 200)
     color_pinch: tuple[int, int, int] = (0, 180, 255)
+
+
+class ShortcutConfig(BaseModel):
+    hold_frames: int = Field(
+        90, description="Frames a gesture must be held to trigger its shortcut."
+    )
+    cooldown_frames: int = Field(25, description="Frames to wait before allowing the next shortcut launch.")
 
 
 class OpenGLConfig(BaseModel):
@@ -150,6 +154,7 @@ class AppConfig(BaseModel):
     camera: CameraConfig = Field(default_factory=CameraConfig)
     gesture: GestureConfig = Field(default_factory=GestureConfig)
     overlay: OverlayConfig = Field(default_factory=OverlayConfig)
+    shortcuts: ShortcutConfig = Field(default_factory=ShortcutConfig)
     cube: CubeConfig = Field(default_factory=CubeConfig)
     opengl: OpenGLConfig = Field(default_factory=OpenGLConfig)
 

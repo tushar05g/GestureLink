@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,10 @@ class Gesture(str, Enum):
     THUMB_MOVE    = "THUMB_MOVE"    # thumb extended → move cursor
     THUMB_CLICK   = "THUMB_CLICK"   # thumb + index touch → left click
     THUMB_RCLICK  = "THUMB_RCLICK"  # thumb + middle touch → right click
+    ONE_FINGER    = "ONE_FINGER"    # index finger up
+    TWO_FINGERS   = "TWO_FINGERS"   # index + middle up
+    THREE_FINGERS = "THREE_FINGERS" # index + middle + ring up
+    FOUR_FINGERS  = "FOUR_FINGERS"  # index + middle + ring + pinky up
     # Shared / Builder
     POINTING      = "POINTING"      # index only → ghost preview
     PINCH         = "PINCH"         # index + middle → paint
@@ -94,6 +99,8 @@ class GestureState:
     left_fist:          bool    = False   # left hand making fist
     right_thumb_index_dist: float = 0.2  # normalised dist for zoom
     right_index_pos:    tuple[float,float] = field(default_factory=lambda: (0.5, 0.5))
+    finger_count:       int = 0
+    landmarks:          list[dict[str, float]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -165,15 +172,28 @@ class GestureClassifier:
         if thumb_middle_dist < gc.thumb_middle_click:
             return Gesture.THUMB_RCLICK, cx, cy
 
-        # Priority 3: Scroll — 3 fingertips raised
+        # Priority 3: one/two/three-finger shortcuts
+        if index_ext and not middle_ext and not ring_ext and not pinky_ext:
+            return Gesture.ONE_FINGER, lm[8].x, lm[8].y
+
+        if index_ext and middle_ext and not ring_ext and not pinky_ext:
+            return Gesture.TWO_FINGERS, (lm[8].x + lm[12].x) / 2.0, (lm[8].y + lm[12].y) / 2.0
+
+        # Priority 4: FOUR fingers for scroll
         index_tip_up  = _fingertip_raised(lm, 8,  5)
         middle_tip_up = _fingertip_raised(lm, 12, 9)
         ring_tip_up   = _fingertip_raised(lm, 16, 13)
-        if index_tip_up and middle_tip_up and ring_tip_up and not pinky_ext:
-            scroll_y = (lm[8].y + lm[12].y + lm[16].y) / 3.0
+        pinky_tip_up  = _fingertip_raised(lm, 20, 17)
+
+        if index_tip_up and middle_tip_up and ring_tip_up and pinky_tip_up:
+            scroll_y = (lm[8].y + lm[12].y + lm[16].y + lm[20].y) / 4.0
             return Gesture.SCROLL, cx, scroll_y
 
-        # Priority 4: Thumb move — thumb extended, others relaxed
+        # Priority 5: THREE-finger shortcuts
+        if index_tip_up and middle_tip_up and ring_tip_up and not pinky_tip_up:
+            return Gesture.THREE_FINGERS, cx, lm[12].y
+
+        # Priority 5: Thumb move — thumb extended, others relaxed
         thumb_mcp_dist = _dist(lm[4], lm[5])
         if thumb_mcp_dist > gc.thumb_extend_threshold and not index_ext:
             return Gesture.THUMB_MOVE, lm[4].x, lm[4].y
@@ -249,76 +269,93 @@ class VisionProcessor:
         self._right_click_cooldown: int = 0
 
         # Try Modal cloud client first
-        from modal_vision import get_modal_client
+        from src.modal_vision import get_modal_client
         self._modal_client = get_modal_client()
 
+        # Always initialize local MediaPipe as fallback
+        import mediapipe as mp
+        model_path = _ensure_model()
+        options = mp.tasks.vision.HandLandmarkerOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
+            running_mode=mp.tasks.vision.RunningMode.IMAGE,
+            num_hands=2,
+            min_hand_detection_confidence=0.6,
+            min_hand_presence_confidence=0.6,
+            min_tracking_confidence=0.5,
+        )
+        self._landmarker   = mp.tasks.vision.HandLandmarker.create_from_options(options)
+        self._mp_image_cls = mp.Image
+        self._mp_format    = mp.ImageFormat.SRGB
+        
         if self._modal_client:
-            logger.info("VisionProcessor using Modal cloud inference.")
-            self._landmarker   = None
-            self._mp_image_cls = None
-            self._mp_format    = None
+            logger.info("VisionProcessor using Modal cloud (with local fallback).")
         else:
-            import mediapipe as mp
-            model_path = _ensure_model()
-            options = mp.tasks.vision.HandLandmarkerOptions(
-                base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
-                running_mode=mp.tasks.vision.RunningMode.IMAGE,
-                num_hands=2,
-                min_hand_detection_confidence=0.6,
-                min_hand_presence_confidence=0.6,
-                min_tracking_confidence=0.5,
-            )
-            self._landmarker   = mp.tasks.vision.HandLandmarker.create_from_options(options)
-            self._mp_image_cls = mp.Image
-            self._mp_format    = mp.ImageFormat.SRGB
-            logger.info("VisionProcessor using local MediaPipe inference.")
+            logger.info("VisionProcessor using local MediaPipe.")
 
     # ------------------------------------------------------------------
-    def process_frame(self, frame_bgr: np.ndarray, builder_mode: bool = False) -> GestureState:
-        import cv2
+    def decode_frame(self, jpeg_bytes: bytes) -> Optional[np.ndarray]:
+        """Convert JPEG bytes into an OpenCV-compatible BGR array."""
+        try:
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            return frame
+        except Exception as e:
+            logger.error("Failed to decode frame: %s", e)
+            return None
 
-        self.last_landmarks      = None
-        self.last_left_landmarks = None
+    async def process_frame(
+        self,
+        frame_bgr: np.ndarray,
+        builder_mode: bool = False,
+    ) -> GestureState:
+        import cv2
+        self.last_landmarks = None
         state = GestureState()
 
-        # --- Get landmarks from Modal or local ---
-        if self._modal_client:
-            raw = self._modal_client.detect(frame_bgr)
-            if not raw["hands"]:
-                self._pinky_hold_frames = 0
-                self._prev_scroll_y     = None
-                return state
-            hands, handedness = self._parse_modal_result(raw)
-        else:
+        # --- High-Performance Cloud Path ---
+        hands, handedness = [], []
+        use_cloud = self._modal_client and os.environ.get("USE_MODAL", "false").lower() == "true"
+        
+        if use_cloud:
+            try:
+                raw = await self._modal_client.detect(frame_bgr)
+                if raw and raw.get("hands"):
+                    hands, handedness = self._parse_modal_result(raw)
+            except Exception as e:
+                logger.warning("Cloud inference delayed or failed: %s", e)
+
+        # --- Local Fallback Path (if cloud fails or is disabled) ---
+        if not hands:
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            frame_rgb.flags.writeable = False
-            mp_image  = self._mp_image_cls(image_format=self._mp_format, data=frame_rgb)
-            result    = self._landmarker.detect(mp_image)
-            if not result.hand_landmarks:
+            mp_image = self._mp_image_cls(image_format=self._mp_format, data=frame_rgb)
+            result = self._landmarker.detect(mp_image)
+            if result.hand_landmarks:
+                hands = result.hand_landmarks
+                handedness = result.handedness
+            else:
                 self._pinky_hold_frames = 0
-                self._prev_scroll_y     = None
                 return state
-            hands      = result.hand_landmarks
-            handedness = result.handedness if hasattr(result, 'handedness') else []
 
         right_lm = None
-        left_lm  = None
+        left_lm = None
 
         for i, hand in enumerate(hands):
             if i < len(handedness):
-                label = handedness[i][0].category_name  # "Left" or "Right"
-                # MediaPipe front camera: "Right" label = user's actual right hand
-                # "Left" label = user's actual left hand
+                label = handedness[i][0].category_name
+                logger.info("Detected hand: %s", label)
                 if label == "Right":
                     right_lm = hand
                 else:
                     left_lm  = hand
             else:
-                # Fallback: first hand = right
-                if right_lm is None:
-                    right_lm = hand
-                else:
-                    left_lm = hand
+                if right_lm is None: right_lm = hand
+                else: left_lm = hand
+
+        # Mirroring Fallback: If only one hand is seen and it's labeled "Left", 
+        # treat it as "Right" for cursor control.
+        if right_lm is None and left_lm is not None:
+            logger.info("Mirroring fallback: Using left hand as right cursor.")
+            right_lm = left_lm
 
         self.last_landmarks      = right_lm
         self.last_left_landmarks = left_lm
@@ -333,6 +370,7 @@ class VisionProcessor:
         if right_lm:
             state.right_thumb_index_dist = _dist(right_lm[4], right_lm[8])
             state.right_index_pos = (right_lm[8].x, right_lm[8].y)
+            state.landmarks = [{"x": l.x, "y": l.y} for l in right_lm]
 
         # --- Classify right hand gesture ---
         if right_lm is None:
@@ -346,6 +384,9 @@ class VisionProcessor:
             gesture, raw_x, raw_y = self._classifier.classify_builder(lm)
         else:
             gesture, raw_x, raw_y = self._classifier.classify_cursor(lm)
+
+        if gesture != Gesture.IDLE:
+            logger.info("Detected gesture: %s", gesture)
 
         # --- Mode switch (pinky hold) ---
         if gesture == Gesture.MODE_SWITCH:
@@ -364,8 +405,9 @@ class VisionProcessor:
         state.cursor_y           = raw_y
         state.pinch_active       = gesture == Gesture.PINCH
         state.thumb_pinch_active = gesture == Gesture.THUMB_PINCH
+        state.finger_count       = 1 if gesture == Gesture.ONE_FINGER else 2 if gesture == Gesture.TWO_FINGERS else 3 if gesture == Gesture.THREE_FINGERS else 0
 
-        # --- Scroll delta ---
+        # --- Scroll delta (4 fingers only) ---
         if gesture == Gesture.SCROLL:
             if self._prev_scroll_y is not None:
                 state.scroll_dy = self._prev_scroll_y - raw_y

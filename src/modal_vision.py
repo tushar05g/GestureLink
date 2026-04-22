@@ -39,15 +39,16 @@ try:
     image = (
         modal.Image.debian_slim(python_version="3.11")
         .pip_install(
-            "mediapipe==0.10.14",
+            "mediapipe>=0.10.14",
             "numpy",
             "opencv-python-headless",
         )
+        .run_commands("apt-get update && apt-get install -y libgl1-mesa-glx")
     )
 
     app = modal.App("gesture-control-vision", image=image)
 
-    @app.cls(cpu=2, memory=1024)
+    @app.cls(gpu="T4", cpu=4, memory=1024)
     class VisionWorker:
         @modal.enter()
         def setup(self):
@@ -66,9 +67,9 @@ try:
                 base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
                 running_mode=mp.tasks.vision.RunningMode.IMAGE,
                 num_hands=2,
-                min_hand_detection_confidence=0.6,
-                min_hand_presence_confidence=0.6,
-                min_tracking_confidence=0.5,
+                min_hand_detection_confidence=0.65,
+                min_hand_presence_confidence=0.65,
+                min_tracking_confidence=0.6,
             )
             self._landmarker   = mp.tasks.vision.HandLandmarker.create_from_options(options)
             self._mp_image_cls = mp.Image
@@ -115,16 +116,25 @@ try:
         Mimics the interface of local MediaPipe detection.
         """
         def __init__(self):
-            self._worker = modal.Cls.lookup(
+            self._worker = modal.Cls.from_name(
                 "gesture-control-vision", "VisionWorker"
             )()
             logger.info("ModalVisionClient connected.")
 
-        def detect(self, frame_bgr) -> dict:
+        async def detect(self, frame_bgr) -> dict:
             import cv2
+            import asyncio
             _, buf = cv2.imencode(".jpg", frame_bgr,
                                   [cv2.IMWRITE_JPEG_QUALITY, 80])
-            return self._worker.detect.remote(buf.tobytes())
+            try:
+                # Use to_thread to safely call the remote Modal function
+                return await asyncio.wait_for(
+                    asyncio.to_thread(self._worker.detect.remote, buf.tobytes()), 
+                    timeout=5.0
+                )
+            except Exception as e:
+                logger.warning("Modal detect timeout or error: %s", e)
+                return {"hands": []}
 
     _MODAL_AVAILABLE = True
 
