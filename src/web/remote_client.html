@@ -233,10 +233,24 @@
 
     <div id="controlTab" class="tab-pane active">
       <section class="card">
-        <div class="video-wrap">
-          <video id="video" playsinline autoplay muted></video>
-          <canvas id="skeleton"></canvas>
+        <div class="btnrow" style="margin-bottom: 16px;">
+          <button id="modeVision" onclick="setMode('vision')" style="flex:1">Vision</button>
+          <button id="modeTrackpad" class="secondary" onclick="setMode('trackpad')" style="flex:1">Trackpad</button>
         </div>
+
+        <div id="visionArea">
+          <div class="video-wrap">
+            <video id="video" playsinline autoplay muted></video>
+            <canvas id="skeleton"></canvas>
+          </div>
+        </div>
+
+        <div id="trackpadArea" style="display:none">
+          <div id="touchZone" style="width:100%; aspect-ratio:1/1.2; background:rgba(0,0,0,0.4); border-radius:16px; border:2px dashed var(--line); display:flex; align-items:center; justify-content:center; touch-action:none;">
+            <span class="muted">Precision Trackpad</span>
+          </div>
+        </div>
+
         <div class="status">
           <div><span class="kv">Target:</span> <span id="activeDeviceName" class="ok">None</span></div>
           <div><span class="kv">Gesture:</span> <span id="gestureText">-</span></div>
@@ -302,6 +316,63 @@
     let devices = [];
     let sendingFrame = false;
     let stream = null;
+    let controlMode = 'vision';
+    let lastX = 0, lastY = 0;
+    let isTouching = false;
+    let touchStartTime = 0;
+    let maxFingers = 0;
+
+    function setMode(mode) {
+      controlMode = mode;
+      document.getElementById('visionArea').style.display = mode === 'vision' ? 'block' : 'none';
+      document.getElementById('trackpadArea').style.display = mode === 'trackpad' ? 'block' : 'none';
+      document.getElementById('modeVision').className = mode === 'vision' ? '' : 'secondary';
+      document.getElementById('modeTrackpad').className = mode === 'trackpad' ? '' : 'secondary';
+      if (mode === 'vision') startLoop();
+    }
+
+    const touchZone = document.getElementById('touchZone');
+    touchZone.addEventListener('touchstart', (e) => {
+      isTouching = true;
+      touchStartTime = Date.now();
+      maxFingers = Math.max(maxFingers, e.touches.length);
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+      e.preventDefault();
+    }, { passive: false });
+
+    touchZone.addEventListener('touchmove', (e) => {
+      if (!isTouching || !activePC || !activePC.ws || activePC.ws.readyState !== 1) return;
+      maxFingers = Math.max(maxFingers, e.touches.length);
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const dx = x - lastX;
+      const dy = y - lastY;
+      
+      if (e.touches.length === 1) {
+          activePC.ws.send(JSON.stringify({ type: 'touch', dx, dy }));
+      } else if (e.touches.length === 2) {
+          activePC.ws.send(JSON.stringify({ type: 'scroll', dy }));
+      }
+      
+      lastX = x;
+      lastY = y;
+      e.preventDefault();
+    }, { passive: false });
+
+    touchZone.addEventListener('touchend', (e) => {
+      if (e.touches.length === 0) { // All fingers up
+          if (Date.now() - touchStartTime < 200) {
+              const button = maxFingers === 1 ? 'left' : 'right';
+              if (activePC && activePC.ws) {
+                activePC.ws.send(JSON.stringify({ type: 'click', button }));
+              }
+          }
+          maxFingers = 0;
+          isTouching = false;
+      }
+      e.preventDefault();
+    }, { passive: false });
 
     function showTab(id) {
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
@@ -382,18 +453,29 @@
       const d = devices[i];
 
       // Smart WebSocket Protocol Handling
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      let host = d.ip;
+      const isHttps = location.protocol === "https:";
+      const isHub = d.ip === window.location.host;
+      let wsUrl = "";
 
-      // Only add :8000 if it's a local IP or localhost. 
-      // Do NOT add it for ngrok or domains.
-      if (!host.includes(":") && !host.includes("ngrok") && !host.includes(".dev")) {
-        host = host + ":8000";
+      if (isHub) {
+          // If connecting to the Hub itself, use the direct endpoint
+          const proto = isHttps ? "wss:" : "ws:";
+          wsUrl = `${proto}//${window.location.host}/ws`;
+      } else if (isHttps) {
+          // If on HTTPS (ngrok) connecting to a REMOTE PC, use the relay
+          wsUrl = `wss://${window.location.host}/relay?target=${d.ip}`;
+      } else {
+          // If on HTTP, connect directly to the target PC
+          let host = d.ip;
+          if (!host.includes(":") && !host.includes("ngrok") && !host.includes(".dev")) {
+            host = host + ":8000";
+          }
+          wsUrl = `ws://${host}/ws`;
       }
 
-      console.log("Connecting to:", `${proto}//${host}/ws`);
+      console.log("Connecting to:", wsUrl);
       try {
-        d.ws = new WebSocket(`${proto}//${host}/ws`);
+        d.ws = new WebSocket(wsUrl);
         d.ws.binaryType = "arraybuffer";
         d.ws.onopen = () => { renderDevices(); activatePC(i); };
         d.ws.onclose = () => { d.ws = null; if (activePC === d) activePC = null; renderDevices(); };
@@ -471,6 +553,7 @@
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
       setInterval(() => {
+        if (controlMode !== 'vision') return;
         if (!activePC || !activePC.ws || activePC.ws.readyState !== 1 || sendingFrame) return;
         canvas.width = 640; canvas.height = 480;
         ctx.drawImage(video, 0, 0, 640, 480);

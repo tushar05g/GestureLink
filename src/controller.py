@@ -229,8 +229,21 @@ class MouseController:
         self._shortcut_triggered = False
         self._shortcut_start_pos = None
 
-    def _handle_right_click(self) -> str:
-        if self._right_click_cooldown == 0:
-            pyautogui.click(button="right", _pause=False)
-            self._right_click_cooldown = self.gc.pinch_cooldown_frames
-        return "RIGHT CLICK"
+    def handle_touch_move(self, dx: float, dy: float) -> str:
+        """Handle relative movement from phone trackpad."""
+        sens = self.gc.smoothing * 15.0 
+        pyautogui.moveRel(int(dx * sens), int(dy * sens), _pause=False)
+        return "TOUCH MOVE"
+
+    def handle_click(self, button: str = "left") -> str:
+        """Handle tap clicks from phone."""
+        pyautogui.click(button=button, _pause=False)
+        return f"{button.upper()} CLICK"
+
+    def handle_touch_scroll(self, dy: float) -> str:
+        """Handle vertical scroll from phone."""
+        scroll_amount = int(dy * self.gc.scroll_speed * 0.1)
+        if abs(scroll_amount) >= 1:
+            pyautogui.scroll(scroll_amount, _pause=False)
+            return "TOUCH SCROLL"
+        return "TOUCH READY"
