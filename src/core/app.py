@@ -14,10 +14,10 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from config import CONFIG
-from controller import MouseController
-from modes import AppMode, BuilderController
-from vision import Gesture, VisionProcessor
+from src.core.config import CONFIG
+from src.core.controller import MouseController
+from src.core.modes import AppMode, BuilderController
+from src.core.vision import Gesture, VisionProcessor
 
 logging.basicConfig(
     level=logging.INFO,

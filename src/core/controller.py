@@ -14,8 +14,8 @@ from enum import Enum, auto
 
 import pyautogui
 
-from src.vision import Gesture, GestureState
-from src.shortcuts import ShortcutManager
+from src.core.vision import Gesture, GestureState
+from src.core.shortcuts import ShortcutManager
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,6 @@ class MouseController:
         return "SCROLL READY"
 
     def _handle_shortcuts(self, state: GestureState) -> str:
-        current = state.gesture
         # Only reset drag if we've actually moved away from a drag gesture.
         # But _handle_shortcuts is only called for ONE/TWO/THREE_FINGERS.
         self._reset_drag()

@@ -213,12 +213,35 @@
 
     .small {
       font-size: 0.8rem;
-      color: var(--muted);
     }
+    #pairingOverlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: var(--bg); z-index: 10000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 20px; text-align: center;
+    }
+    .pin-input {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px; padding: 15px; font-size: 24px;
+      color: white; text-align: center; letter-spacing: 10px;
+      width: 200px; margin: 20px 0; outline: none;
+    }
+    .pin-input:focus { border-color: var(--accent); }
+    .hidden { display: none !important; }
   </style>
 </head>
 
 <body>
+  <div id="pairingOverlay" class="hidden">
+    <div class="card" style="max-width: 400px;">
+      <h2>🔒 Pair Your Device</h2>
+      <p class="small">Enter the 6-digit PIN displayed on your Hub terminal.</p>
+      <input type="text" id="pinInput" class="pin-input" maxlength="6" placeholder="000000">
+      <button id="pairBtn" style="width: 100%;">Pair Now</button>
+      <p id="pairError" class="small" style="color: #ff4444; margin-top: 10px;"></p>
+    </div>
+  </div>
   <main class="shell">
     <div class="hero">
       <h1>GestureLink</h1>
@@ -298,7 +321,11 @@
           <label>Cursor Sensitivity</label>
           <input type="range" id="sensRange" min="5" max="95" value="50">
         </div>
-        <button id="saveBtn" style="width:100%">Save to Device</button>
+        <div class="input-group" style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="margin-bottom: 0;">Vibration Feedback</label>
+          <input type="checkbox" id="hapticToggle" style="width: auto;" checked>
+        </div>
+        <button id="saveBtn" style="width:100%">Save Settings</button>
       </article>
     </div>
   </main>
@@ -314,6 +341,56 @@
 
     let activePC = null;
     let devices = [];
+    let authToken = localStorage.getItem("gesturelink_token");
+    let hapticsEnabled = localStorage.getItem("gesturelink_haptics") !== "false";
+
+    // UI Elements
+    const pairingOverlay = document.getElementById("pairingOverlay");
+    const pinInput = document.getElementById("pinInput");
+    const pairBtn = document.getElementById("pairBtn");
+    const pairError = document.getElementById("pairError");
+
+    if (!authToken) {
+      pairingOverlay.classList.remove("hidden");
+    }
+
+    pairBtn.onclick = async () => {
+      const pin = pinInput.value;
+      if (pin.length !== 6) { pairError.textContent = "Enter 6 digits"; return; }
+      
+      try {
+        const res = await fetch("/api/pair", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          authToken = data.token;
+          localStorage.setItem("gesturelink_token", authToken);
+          pairingOverlay.classList.add("hidden");
+          initApp();
+        } else {
+          pairError.textContent = data.error || "Pairing failed";
+        }
+      } catch (e) {
+        pairError.textContent = "Connection error";
+      }
+    };
+
+    function initApp() {
+      if (authToken) {
+        initCamera();
+      }
+      document.getElementById("hapticToggle").checked = hapticsEnabled;
+    }
+
+    function triggerHaptic(type = 'light') {
+      if (!hapticsEnabled || !navigator.vibrate) return;
+      if (type === 'light') navigator.vibrate(10);
+      else if (type === 'medium') navigator.vibrate(30);
+      else if (type === 'double') navigator.vibrate([10, 50, 10]);
+    }
     let sendingFrame = false;
     let stream = null;
     let controlMode = 'vision';
@@ -366,6 +443,7 @@
               const button = maxFingers === 1 ? 'left' : 'right';
               if (activePC && activePC.ws) {
                 activePC.ws.send(JSON.stringify({ type: 'click', button }));
+                triggerHaptic(button === 'left' ? 'light' : 'medium');
               }
           }
           maxFingers = 0;
@@ -460,17 +538,17 @@
       if (isHub) {
           // If connecting to the Hub itself, use the direct endpoint
           const proto = isHttps ? "wss:" : "ws:";
-          wsUrl = `${proto}//${window.location.host}/ws`;
+          wsUrl = `${proto}//${window.location.host}/ws?token=${authToken}`;
       } else if (isHttps) {
           // If on HTTPS (ngrok) connecting to a REMOTE PC, use the relay
-          wsUrl = `wss://${window.location.host}/relay?target=${d.ip}`;
+          wsUrl = `wss://${window.location.host}/relay?target=${d.ip}&token=${authToken}`;
       } else {
           // If on HTTP, connect directly to the target PC
           let host = d.ip;
           if (!host.includes(":") && !host.includes("ngrok") && !host.includes(".dev")) {
             host = host + ":8000";
           }
-          wsUrl = `ws://${host}/ws`;
+          wsUrl = `ws://${host}/ws`; // Agents use a different secret token known only to the Hub
       }
 
       console.log("Connecting to:", wsUrl);
@@ -585,10 +663,12 @@
       await fetch(`${base}/api/settings`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sensitivity: parseInt(document.getElementById("sensRange").value) })
       });
+      hapticsEnabled = document.getElementById("hapticToggle").checked;
+      localStorage.setItem("gesturelink_haptics", hapticsEnabled);
       alert("Settings Saved!");
     };
 
-    startLoop();
+    initApp();
   </script>
 </body>
 

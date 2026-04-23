@@ -269,7 +269,7 @@ class VisionProcessor:
         self._right_click_cooldown: int = 0
 
         # Try Modal cloud client first
-        from src.modal_vision import get_modal_client
+        from src.core.modal_vision import get_modal_client
         self._modal_client = get_modal_client()
 
         # Always initialize local MediaPipe as fallback
