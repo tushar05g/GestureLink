@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import qrcode
+import socket
 
 from src.core.config import CONFIG
 from src.core.controller import MouseController
@@ -248,6 +249,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         buf.seek(0)
         return StreamingResponse(buf, media_type="image/png")
 
+    async def _rotate_pin_periodically():
+        while True:
+            await asyncio.sleep(1800) # 30 minutes
+            tokens.reset_pin()
+            logger.info("Background PIN rotation triggered.")
+
     @app.on_event("startup")
     async def startup():
         _load_settings()
@@ -261,6 +268,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         print(f"  • Pairing PIN:      {tokens.current_pin}")
         print("═"*50 + "\n")
         logger.info("Hub Started successfully.")
+        # Store in app state or a variable in the closure to prevent GC
+        app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
 
     @app.on_event("shutdown")
     def shutdown():

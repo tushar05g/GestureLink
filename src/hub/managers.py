@@ -67,11 +67,16 @@ class SecurityManager:
 
 class TokenManager:
     def __init__(self):
-        self.current_pin: str = str(secrets.randbelow(900000) + 100000)
+        self.current_pin: str = ""
         self.valid_tokens: Dict[str, str] = {}
+        self.reset_pin()
 
     def reset_pin(self) -> str:
         self.current_pin = str(secrets.randbelow(900000) + 100000)
+        # Optional: Decide if we want to clear all tokens when PIN resets
+        # For security requested by user, clearing tokens forces re-pair
+        self.valid_tokens.clear()
+        logger.info("PIN rotated to %s. All existing tokens invalidated.", self.current_pin)
         return self.current_pin
 
     def generate_token(self, client_ip: str) -> str:

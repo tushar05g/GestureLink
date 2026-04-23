@@ -143,15 +143,29 @@ def _is_fist(lm, threshold: float = 0.06) -> bool:
 class GestureClassifier:
     def __init__(self, cfg) -> None:
         self.gc = cfg.gesture
+        self.last_gesture = Gesture.IDLE
+        self.gesture_count = 0
+        self.MIN_FRAMES = 2 # minimum frames to hold a gesture
+
+    def _get_palm_size(self, lm) -> float:
+        # Distance between wrist (0) and middle finger MCP (9)
+        return _dist(lm[0], lm[9])
 
     def classify_cursor(self, lm) -> tuple[Gesture, float, float]:
         """Classify gestures for Cursor (Productivity) mode."""
         gc = self.gc
+        palm_size = self._get_palm_size(lm)
+        if palm_size < 0.01: palm_size = 0.1 # avoid div zero
 
         index_ext  = _finger_extended(lm, 8,  6)
         middle_ext = _finger_extended(lm, 12, 10)
         ring_ext   = _finger_extended(lm, 16, 14)
         pinky_ext  = _finger_extended(lm, 20, 18)
+
+        # Normalize thresholds by palm size
+        click_thresh  = gc.thumb_index_click * (palm_size / 0.1)
+        rclick_thresh = gc.thumb_middle_click * (palm_size / 0.1)
+        move_thresh   = gc.thumb_extend_threshold * (palm_size / 0.1)
 
         thumb_index_dist  = _dist(lm[4], lm[8])
         thumb_middle_dist = _dist(lm[4], lm[12])
@@ -160,45 +174,57 @@ class GestureClassifier:
         cx = lm[4].x
         cy = lm[4].y
 
+        raw_gesture = Gesture.IDLE
+
         # Priority 0: Mode switch — pinky only hold
         if pinky_ext and not index_ext and not middle_ext and not ring_ext:
-            return Gesture.MODE_SWITCH, cx, cy
+            raw_gesture = Gesture.MODE_SWITCH
 
         # Priority 1: Thumb + Index touch → left click
-        if thumb_index_dist < gc.thumb_index_click:
-            return Gesture.THUMB_CLICK, cx, cy
+        elif thumb_index_dist < click_thresh:
+            raw_gesture = Gesture.THUMB_CLICK
 
         # Priority 2: Thumb + Middle touch → right click
-        if thumb_middle_dist < gc.thumb_middle_click:
-            return Gesture.THUMB_RCLICK, cx, cy
+        elif thumb_middle_dist < rclick_thresh:
+            raw_gesture = Gesture.THUMB_RCLICK
 
         # Priority 3: one/two/three-finger shortcuts
-        if index_ext and not middle_ext and not ring_ext and not pinky_ext:
-            return Gesture.ONE_FINGER, lm[8].x, lm[8].y
+        elif index_ext and not middle_ext and not ring_ext and not pinky_ext:
+            raw_gesture = Gesture.ONE_FINGER
+            cx, cy = lm[8].x, lm[8].y
 
-        if index_ext and middle_ext and not ring_ext and not pinky_ext:
-            return Gesture.TWO_FINGERS, (lm[8].x + lm[12].x) / 2.0, (lm[8].y + lm[12].y) / 2.0
+        elif index_ext and middle_ext and not ring_ext and not pinky_ext:
+            raw_gesture = Gesture.TWO_FINGERS
+            cx, cy = (lm[8].x + lm[12].x) / 2.0, (lm[8].y + lm[12].y) / 2.0
 
         # Priority 4: FOUR fingers for scroll
-        index_tip_up  = _fingertip_raised(lm, 8,  5)
-        middle_tip_up = _fingertip_raised(lm, 12, 9)
-        ring_tip_up   = _fingertip_raised(lm, 16, 13)
-        pinky_tip_up  = _fingertip_raised(lm, 20, 17)
+        else:
+            index_tip_up  = _fingertip_raised(lm, 8,  5)
+            middle_tip_up = _fingertip_raised(lm, 12, 9)
+            ring_tip_up   = _fingertip_raised(lm, 16, 13)
+            pinky_tip_up  = _fingertip_raised(lm, 20, 17)
 
-        if index_tip_up and middle_tip_up and ring_tip_up and pinky_tip_up:
-            scroll_y = (lm[8].y + lm[12].y + lm[16].y + lm[20].y) / 4.0
-            return Gesture.SCROLL, cx, scroll_y
+            if index_tip_up and middle_tip_up and ring_tip_up and pinky_tip_up:
+                raw_gesture = Gesture.SCROLL
+                cy = (lm[8].y + lm[12].y + lm[16].y + lm[20].y) / 4.0
+            elif index_tip_up and middle_tip_up and ring_tip_up and not pinky_tip_up:
+                raw_gesture = Gesture.THREE_FINGERS
+                cy = lm[12].y
+            else:
+                # Priority 5: Thumb move — thumb extended, others relaxed
+                thumb_mcp_dist = _dist(lm[4], lm[5])
+                if thumb_mcp_dist > move_thresh and not index_ext:
+                    raw_gesture = Gesture.THUMB_MOVE
 
-        # Priority 5: THREE-finger shortcuts
-        if index_tip_up and middle_tip_up and ring_tip_up and not pinky_tip_up:
-            return Gesture.THREE_FINGERS, cx, lm[12].y
+        # Hysteresis
+        if raw_gesture == self.last_gesture:
+            self.gesture_count += 1
+        else:
+            self.gesture_count = 0
+            self.last_gesture = raw_gesture
 
-        # Priority 5: Thumb move — thumb extended, others relaxed
-        thumb_mcp_dist = _dist(lm[4], lm[5])
-        if thumb_mcp_dist > gc.thumb_extend_threshold and not index_ext:
-            return Gesture.THUMB_MOVE, lm[4].x, lm[4].y
-
-        return Gesture.IDLE, cx, cy
+        res_gesture = self.last_gesture if self.gesture_count >= self.MIN_FRAMES else Gesture.IDLE
+        return res_gesture, cx, cy
 
     def classify_builder(self, lm) -> tuple[Gesture, float, float]:
         """Classify gestures for Builder mode (single hand)."""
@@ -314,7 +340,8 @@ class VisionProcessor:
 
         # --- High-Performance Cloud Path ---
         hands, handedness = [], []
-        use_cloud = self._modal_client and os.environ.get("USE_MODAL", "false").lower() == "true"
+        # Bypass cloud for Builder Mode to ensure sub-10ms latency
+        use_cloud = self._modal_client and os.environ.get("USE_MODAL", "false").lower() == "true" and not builder_mode
         
         if use_cloud:
             try:
