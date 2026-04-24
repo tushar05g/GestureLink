@@ -146,6 +146,11 @@ class GestureClassifier:
         self.last_gesture = Gesture.IDLE
         self.gesture_count = 0
         self.MIN_FRAMES = 2 # minimum frames to hold a gesture
+        
+        # Velocity Tracking
+        self._prev_dist_ti = 1.0
+        self._prev_dist_tm = 1.0
+        self._click_cooldown = 0
 
     def _get_palm_size(self, lm) -> float:
         # Distance between wrist (0) and middle finger MCP (9)
@@ -170,61 +175,66 @@ class GestureClassifier:
         thumb_index_dist  = _dist(lm[4], lm[8])
         thumb_middle_dist = _dist(lm[4], lm[12])
 
-        # Thumb tip position as cursor anchor
-        cx = lm[4].x
-        cy = lm[4].y
+        # Velocity Check: positive if closing
+        vel_ti = self._prev_dist_ti - thumb_index_dist
+        vel_tm = self._prev_dist_tm - thumb_middle_dist
+        self._prev_dist_ti = thumb_index_dist
+        self._prev_dist_tm = thumb_middle_dist
 
+        # Default anchor
+        cx, cy = lm[4].x, lm[4].y
         raw_gesture = Gesture.IDLE
 
-        # Priority 0: Mode switch — pinky only hold
+        # --- Priority Decision Tree ---
+
+        # 0. Mode switch (Pinky hold)
         if pinky_ext and not index_ext and not middle_ext and not ring_ext:
             raw_gesture = Gesture.MODE_SWITCH
 
-        # Priority 1: Thumb + Index touch → left click
-        elif thumb_index_dist < click_thresh:
-            raw_gesture = Gesture.THUMB_CLICK
+        # 1. Multi-finger Scroll (4 fingers up)
+        elif index_ext and middle_ext and ring_ext and pinky_ext:
+            raw_gesture = Gesture.SCROLL
+            cy = (lm[8].y + lm[12].y + lm[16].y + lm[20].y) / 4.0
 
-        # Priority 2: Thumb + Middle touch → right click
-        elif thumb_middle_dist < rclick_thresh:
-            raw_gesture = Gesture.THUMB_RCLICK
-
-        # Priority 3: one/two/three-finger shortcuts
-        elif index_ext and not middle_ext and not ring_ext and not pinky_ext:
-            raw_gesture = Gesture.ONE_FINGER
-            cx, cy = lm[8].x, lm[8].y
-
-        elif index_ext and middle_ext and not ring_ext and not pinky_ext:
+        # 2. Shortcuts (1, 2, 3 fingers)
+        elif index_ext and middle_ext and ring_ext and not pinky_ext:
+            raw_gesture = Gesture.THREE_FINGERS
+            cx, cy = (lm[8].x + lm[12].x + lm[16].x) / 3.0, (lm[8].y + lm[12].y + lm[16].y) / 3.0
+        
+        elif index_ext and middle_ext and not ring_ext:
             raw_gesture = Gesture.TWO_FINGERS
             cx, cy = (lm[8].x + lm[12].x) / 2.0, (lm[8].y + lm[12].y) / 2.0
 
-        # Priority 4: FOUR fingers for scroll
+        elif index_ext and not middle_ext and not ring_ext:
+            raw_gesture = Gesture.ONE_FINGER
+            cx, cy = lm[8].x, lm[8].y
+
+        # 3. Thumb-based Clicks (Velocity-aware)
+        elif thumb_index_dist < click_thresh:
+            if vel_ti > 0.005 or thumb_index_dist < (click_thresh * 0.7):
+                raw_gesture = Gesture.THUMB_CLICK
+        
+        elif thumb_middle_dist < rclick_thresh:
+            if vel_tm > 0.005 or thumb_middle_dist < (rclick_thresh * 0.7):
+                raw_gesture = Gesture.THUMB_RCLICK
+
+        # 4. Standard Move (Thumb extended)
         else:
-            index_tip_up  = _fingertip_raised(lm, 8,  5)
-            middle_tip_up = _fingertip_raised(lm, 12, 9)
-            ring_tip_up   = _fingertip_raised(lm, 16, 13)
-            pinky_tip_up  = _fingertip_raised(lm, 20, 17)
+            thumb_mcp_dist = _dist(lm[4], lm[5])
+            if thumb_mcp_dist > move_thresh:
+                raw_gesture = Gesture.THUMB_MOVE
 
-            if index_tip_up and middle_tip_up and ring_tip_up and pinky_tip_up:
-                raw_gesture = Gesture.SCROLL
-                cy = (lm[8].y + lm[12].y + lm[16].y + lm[20].y) / 4.0
-            elif index_tip_up and middle_tip_up and ring_tip_up and not pinky_tip_up:
-                raw_gesture = Gesture.THREE_FINGERS
-                cy = lm[12].y
-            else:
-                # Priority 5: Thumb move — thumb extended, others relaxed
-                thumb_mcp_dist = _dist(lm[4], lm[5])
-                if thumb_mcp_dist > move_thresh and not index_ext:
-                    raw_gesture = Gesture.THUMB_MOVE
-
-        # Hysteresis
+        # --- Hysteresis / Stability ---
         if raw_gesture == self.last_gesture:
             self.gesture_count += 1
         else:
-            self.gesture_count = 0
-            self.last_gesture = raw_gesture
+            if self.gesture_count < self.MIN_FRAMES:
+                raw_gesture = self.last_gesture
+            else:
+                self.last_gesture = raw_gesture
+                self.gesture_count = 0
 
-        res_gesture = self.last_gesture if self.gesture_count >= self.MIN_FRAMES else Gesture.IDLE
-        return res_gesture, cx, cy
+        return raw_gesture, cx, cy
 
     def classify_builder(self, lm) -> tuple[Gesture, float, float]:
         """Classify gestures for Builder mode (single hand)."""

@@ -54,7 +54,12 @@ def main():
         
     elif args.command == "install":
         print("🛠 Opening Installer...")
-        run_command(["installers/hub/install.py"])
+        try:
+            # Try GUI first for non-tech users
+            run_command(["src/hub/gui_installer.py"])
+        except Exception:
+            # Fallback to terminal
+            run_command(["installers/hub/install.py"])
         
     elif args.command == "builder":
         print("🧱 Builder Mode is currently in Research Phase. See builder_mode_research.md")

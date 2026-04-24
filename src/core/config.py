@@ -91,7 +91,7 @@ class OverlayConfig(BaseModel):
 
 class ShortcutConfig(BaseModel):
     hold_frames: int = Field(
-        90, description="Frames a gesture must be held to trigger its shortcut."
+        45, description="Frames a gesture must be held to trigger its shortcut."
     )
     cooldown_frames: int = Field(25, description="Frames to wait before allowing the next shortcut launch.")
 

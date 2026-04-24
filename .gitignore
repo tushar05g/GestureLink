@@ -1,3 +1,10 @@
+# GestureLink Ignores
+*.zip
+.installed
+cert.pem
+key.pem
+node_modules/
+
 # Python compiled files
 __pycache__/
 *.py[cod]

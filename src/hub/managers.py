@@ -23,7 +23,10 @@ class SecurityManager:
         self.security_file = security_file
         self.trusted_ips: Set[str] = set()
         self.blocked_ips: Set[str] = set()
-        self.pending_approvals: Dict[str, asyncio.Event] = {}
+        # request_id -> {ip, hostname, timestamp}
+        self.pending_requests: Dict[str, dict] = {}
+        # ip -> token (stored here until phone polls)
+        self.approved_tokens: Dict[str, str] = {}
         self.load()
 
     def save(self) -> None:
@@ -47,23 +50,39 @@ class SecurityManager:
             except Exception as e:
                 logger.error("Failed to load security settings: %s", e)
 
+    def add_pending_request(self, ip: str, hostname: str) -> str:
+        req_id = str(uuid.uuid4())[:8]
+        self.pending_requests[req_id] = {
+            "ip": ip,
+            "hostname": hostname,
+            "id": req_id
+        }
+        return req_id
+
+    def approve_request(self, req_id: str, token: str) -> bool:
+        req = self.pending_requests.pop(req_id, None)
+        if req:
+            ip = req["ip"]
+            self.trusted_ips.add(ip)
+            self.approved_tokens[ip] = token
+            self.save()
+            return True
+        return False
+
+    def reject_request(self, req_id: str) -> None:
+        req = self.pending_requests.pop(req_id, None)
+        if req:
+            self.blocked_ips.add(req["ip"])
+            self.save()
+
+    def get_token_for_ip(self, ip: str) -> Optional[str]:
+        return self.approved_tokens.pop(ip, None)
+
     async def request_consent(self, ip: str) -> bool:
+        # Legacy/Handshake check
         if ip in ("127.0.0.1", "localhost", "::1"): return True
         if ip in self.blocked_ips: return False
-        if ip in self.trusted_ips: return True
-
-        if ip not in self.pending_approvals:
-            self.pending_approvals[ip] = asyncio.Event()
-        
-        logger.info("New device %s is waiting for approval...", ip)
-        try:
-            await asyncio.wait_for(self.pending_approvals[ip].wait(), timeout=60.0)
-            return ip in self.trusted_ips
-        except asyncio.TimeoutError:
-            logger.warning("Approval timeout for %s", ip)
-            return False
-        finally:
-            self.pending_approvals.pop(ip, None)
+        return ip in self.trusted_ips
 
 class TokenManager:
     def __init__(self):
@@ -73,11 +92,11 @@ class TokenManager:
 
     def reset_pin(self) -> str:
         self.current_pin = str(secrets.randbelow(900000) + 100000)
-        # Optional: Decide if we want to clear all tokens when PIN resets
-        # For security requested by user, clearing tokens forces re-pair
-        self.valid_tokens.clear()
-        logger.info("PIN rotated to %s. All existing tokens invalidated.", self.current_pin)
+        logger.info("PIN rotated to %s. Active session tokens remain valid.", self.current_pin)
         return self.current_pin
+
+    def validate_pin(self, pin: str) -> bool:
+        return pin == self.current_pin
 
     def generate_token(self, client_ip: str) -> str:
         token = str(uuid.uuid4())
@@ -104,7 +123,7 @@ class DeviceDiscovery(ServiceListener):
         hostname = socket.gethostname().replace(".local", "")
         service_type = "_gesturelink._tcp.local."
         service_name = f"GestureLink-Hub-{hostname}.{service_type}"
-        
+
         self.info = ServiceInfo(
             service_type,
             service_name,
@@ -116,13 +135,22 @@ class DeviceDiscovery(ServiceListener):
         try:
             self.zc.register_service(self.info)
             logger.info("Zeroconf: Broadcasting Hub as %s", service_name)
-        except Exception as e:
-            logger.warning("Zeroconf: Failed to register service: %s", e)
+        except Exception as exc:
+            # Issue 9: log full exception so the cause is visible in terminal
+            logger.warning("Zeroconf: Failed to register service (%s: %s). mDNS discovery disabled.",
+                           type(exc).__name__, exc)
+            self.info = None  # prevent unregister attempt on shutdown
 
         self.browser = ServiceBrowser(self.zc, "_gesturelink._tcp.local.", self)
 
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None: pass
-    def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None: pass
+    def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        # Issue 9: remove agent from discovered list when it goes offline
+        hostname = name.split(".")[0]
+        to_remove = [ip for ip, hn in self.discovered_devices.items() if hn == hostname]
+        for ip in to_remove:
+            del self.discovered_devices[ip]
+            logger.info("Zeroconf: Agent offline: %s (%s)", hostname, ip)
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         info = zc.get_service_info(type_, name)
         if info and info.addresses:  # Bug #4: guard against empty addresses

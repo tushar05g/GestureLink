@@ -19,6 +19,7 @@ const pairingOverlay = document.getElementById("pairingOverlay")!;
 const pinInputs = document.querySelectorAll<HTMLInputElement>(".pin-box");
 const pairBtn = document.getElementById("pairBtn")!;
 const pairError = document.getElementById("pairError")!;
+const pairStatusText = document.getElementById("pairStatusText")!;
 const connBadge = document.getElementById("connBadge")!;
 const activeDeviceName = document.getElementById("activeDeviceName")!;
 const activeDeviceIP = document.getElementById("activeDeviceIP")!;
@@ -28,26 +29,57 @@ const touchZone = document.getElementById("touchZone")!;
 const deviceList = document.getElementById("deviceList")!;
 const navItems = document.querySelectorAll(".nav-item");
 const tabContents = document.querySelectorAll(".tab-content");
+const appModal = document.getElementById("appModal")!;
+const appSelect = document.getElementById("appSelect") as HTMLSelectElement;
+const customTarget = document.getElementById("customTarget") as HTMLInputElement;
+const saveAppShortcut = document.getElementById("saveAppShortcut")!;
+const closeAppModal = document.getElementById("closeAppModal")!;
 
 // --- Initialization ---
 async function init() {
   setupNav();
   setupTouchpad();
   setupPinInputs();
+  setupShortcuts();
   
-  // Auto-pairing from QR
+  // Issue 8 fix: removed duplicate logoutBtn.onclick here.
+  // The event listener at line ~105 handles logout with a confirm dialog.
+
+  closeAppModal.onclick = () => {
+    appModal.style.display = 'none';
+  };
+  
+  // Auto-pairing from QR: Always prioritize auto-pin if provided
   const urlParams = new URLSearchParams(globalThis.location.search);
   const autoPin = urlParams.get('pin');
-  if (autoPin?.length === 6 && !authToken) {
+  if (autoPin?.length === 6) {
     await autoPair(autoPin);
     authToken = localStorage.getItem("gesturelink_token");
   }
 
-  // Overlay management
+  // Validate stored token against server — catches stale tokens after server restart
   if (authToken && authToken !== "undefined") {
-    pairingOverlay.classList.add('hidden');
-    setTimeout(() => pairingOverlay.style.display = 'none', 500);
-    startApp();
+    try {
+      const vRes = await fetch(`${location.origin}/api/validate-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: authToken })
+      });
+      const vData = await vRes.json();
+      if (vData.valid) {
+        pairingOverlay.classList.add('hidden');
+        setTimeout(() => pairingOverlay.style.display = 'none', 500);
+        startApp();
+      } else {
+        // Token expired/server restarted — force re-pair cleanly
+        localStorage.removeItem("gesturelink_token");
+        authToken = null;
+        pairingOverlay.style.display = 'flex';
+      }
+    } catch (_) {
+      // Server unreachable — still show overlay
+      pairingOverlay.style.display = 'flex';
+    }
   } else {
     pairingOverlay.style.display = 'flex';
   }
@@ -74,6 +106,12 @@ async function init() {
 
   document.getElementById("saveBtn")?.addEventListener('click', saveSettings);
 
+  document.getElementById("logoutBtn")?.addEventListener('click', async () => {
+    if (confirm("Disconnect and reset this session?")) {
+      await logout();
+    }
+  });
+
   document.getElementById("addManualBtn")!.onclick = () => {
     const ip = prompt("Enter Hub IP (e.g. 192.168.1.5):");
     if (ip) addDeviceToList(ip, "Manual PC");
@@ -89,9 +127,16 @@ async function init() {
       const res = await fetch(`${location.origin}/api/discovered`);
       const data = await res.json();
       const discovered: Record<string, string> = data.devices || {};
-      Object.entries(discovered).forEach(([ip, hostname]) => addDeviceToList(ip, hostname as string));
-      if (Object.keys(discovered).length === 0) {
-        deviceList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">No agents found on network</div>';
+      let foundNew = false;
+      Object.entries(discovered).forEach(([ip, hostname]) => {
+        if (!devices.some(d => d.ip === ip)) {
+           addDeviceToList(ip, hostname as string);
+           foundNew = true;
+        }
+      });
+      if (!foundNew && Object.keys(discovered).length > 0) {
+        // Just re-render if we found things but they were already there
+        renderDeviceList();
       }
     } finally {
       scanBtn.removeAttribute('disabled');
@@ -159,7 +204,7 @@ globalThis.connectToPC = async (i: number) => {
   }
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${proto}//${location.host}/ws?token=${authToken}`;
+  const wsUrl = `${proto}//${location.host}/ws?token=${authToken}&target=${d.ip}`;
 
   try {
     if (d.ws) d.ws.close();
@@ -195,6 +240,13 @@ globalThis.connectToPC = async (i: number) => {
       if (activePC !== d) return;
       try {
         const data = JSON.parse(msg.data);
+        // Handle relay error from Hub (agent unreachable)
+        if (data.type === 'error') {
+          connBadge.textContent = 'ERROR';
+          connBadge.classList.remove('online');
+          alert(`⚠️ ${data.message || 'Connection error'}`);
+          return;
+        }
         if (data.gesture) {
           const old = gestureText.textContent;
           gestureText.textContent = data.gesture;
@@ -270,13 +322,68 @@ async function syncSettings() {
   } catch (_) { }
 }
 
-function renderShortcuts(shortcuts: Record<string, string>) {
+function renderShortcuts(shortcuts: Record<string, any>) {
   // Update the shortcut key display from server data
   document.querySelectorAll<HTMLElement>('[data-shortcut]').forEach(el => {
     const key = el.dataset.shortcut!;
-    if (shortcuts[key]) el.textContent = shortcuts[key];
+    if (shortcuts[key]) {
+      const binding = shortcuts[key];
+      el.textContent = binding.target || "None";
+    }
   });
 }
+
+// @ts-ignore
+globalThis.editShortcut = async (slot: string) => {
+  const modal = document.getElementById("appModal")!;
+  const select = document.getElementById("appSelect") as HTMLSelectElement;
+  const customInput = document.getElementById("customTarget") as HTMLInputElement;
+  const saveBtn = document.getElementById("saveAppShortcut")!;
+  const closeBtn = document.getElementById("closeAppModal")!;
+
+  // Reset modal
+  select.innerHTML = '<option value="">-- Choose from device --</option>';
+  customInput.value = "";
+  modal.style.display = 'flex';
+
+  // Fetch apps from active device via Hub proxy
+  try {
+    const ip = activePC?.ip || location.hostname;
+    const res = await fetch(`${location.origin}/api/apps?ip=${ip}`);
+    const data = await res.json();
+    (data.apps || []).forEach((app: any) => {
+      const opt = document.createElement("option");
+      opt.value = app.target;
+      opt.textContent = app.name;
+      select.appendChild(opt);
+    });
+  } catch (e) { console.error("Failed to fetch apps", e); }
+
+  closeBtn.onclick = () => modal.style.display = 'none';
+  
+  saveBtn.onclick = async () => {
+    const target = customInput.value || select.value;
+    if (!target) return;
+
+    try {
+      const res = await fetch(`${location.origin}/api/shortcuts`);
+      const data = await res.json();
+      const shortcuts = data.shortcuts || {};
+      
+      shortcuts[slot] = { target, mode: target.startsWith('http') ? 'url' : 'app' };
+      
+      await fetch(`${location.origin}/api/shortcuts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shortcuts })
+      });
+      
+      renderShortcuts(shortcuts);
+      triggerHaptic(ImpactStyle.Medium);
+      modal.style.display = 'none';
+    } catch (e) { alert("Failed to update shortcut"); }
+  };
+};
 
 async function saveSettings() {
   if (!activePC) return;
@@ -308,32 +415,140 @@ function setupPinInputs() {
 
 async function autoPair(pin: string) {
   if (pin.length !== 6) return;
+  pairStatusText.textContent = "Verifying PIN...";
+
   try {
     const res = await fetch(`${location.origin}/api/pair`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin })
+      body: JSON.stringify({ pin, hostname: "Mobile Controller" })
     });
     const data = await res.json();
-    if (data.token) {
-      localStorage.setItem("gesturelink_token", data.token);
-      authToken = data.token;
-      pairingOverlay.classList.add('hidden');
-      setTimeout(() => pairingOverlay.style.display = 'none', 500);
-      triggerHaptic(ImpactStyle.Heavy);
-      startApp();
+    
+    if (data.status === "approved" && data.token) {
+      finalizePairing(data.token);
+    } else if (data.status === "pending") {
+      pairStatusText.textContent = "Waiting for Hub approval...";
+      pollPairingStatus(data.request_id);
     } else {
       pairError.style.opacity = '1';
       triggerHaptic(ImpactStyle.Medium);
       setTimeout(() => pairError.style.opacity = '0', 3000);
+      pairStatusText.textContent = "";
     }
-  } catch (e) { pairError.style.opacity = '1'; }
+  } catch (e) { 
+    pairError.style.opacity = '1';
+    pairStatusText.textContent = "";
+  }
 }
+
+function finalizePairing(token: string) {
+  localStorage.setItem("gesturelink_token", token);
+  authToken = token;
+  pairingOverlay.classList.add('hidden');
+  setTimeout(() => pairingOverlay.style.display = 'none', 500);
+  triggerHaptic(ImpactStyle.Heavy);
+  startApp();
+}
+
+async function pollPairingStatus(reqId: string) {
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch(`${location.origin}/api/pair/status/${reqId}`);
+      const data = await res.json();
+      if (data.status === "approved") {
+        clearInterval(interval);
+        finalizePairing(data.token);
+      } else if (data.status === "rejected") {
+        clearInterval(interval);
+        pairError.style.opacity = '1';
+        setTimeout(() => pairError.style.opacity = '0', 3000);
+        pairStatusText.textContent = "Request rejected";
+      }
+    } catch (e) {
+      clearInterval(interval);
+    }
+  }, 2000);
+}
+
+// Issue 6 fix: setupShortcuts only does initial load of labels.
+// editShortcut is handled by the globalThis.editShortcut below (line ~326).
+async function setupShortcuts() {
+  try {
+    const res = await fetch(`${location.origin}/api/shortcuts`);
+    const data = await res.json();
+    renderShortcuts(data.shortcuts || {});
+  } catch (_) { /* use defaults */ }
+}
+
+let activeShortcutSlot = "";
+(globalThis as any).editShortcut = async (slot: string) => {
+  activeShortcutSlot = slot;
+  appModal.style.display = 'flex';
+  
+  // Load apps from active PC
+  try {
+    const targetIp = activePC ? activePC.ip : "";
+    const res = await fetch(`${location.origin}/api/apps?ip=${targetIp}`);
+    const data = await res.json();
+    appSelect.innerHTML = '<option value="">-- Choose from device --</option>';
+    data.apps.forEach((app: any) => {
+      const opt = document.createElement("option");
+      opt.value = app.target;
+      opt.textContent = app.name;
+      appSelect.appendChild(opt);
+    });
+  } catch(e) {
+    console.error("Failed to load apps", e);
+  }
+};
+
+saveAppShortcut.onclick = async () => {
+  const target = customTarget.value.trim() || appSelect.value;
+  if (!target) { alert("Please select or type an app/command."); return; }
+
+  try {
+    // Issue 7 fix: use the correct {slot, target} payload the server expects
+    const res = await fetch(`${location.origin}/api/shortcuts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcuts: { [activeShortcutSlot]: { target, enabled: true } } })
+    });
+    if (!res.ok) throw new Error("Server error");
+
+    // Update UI label
+    const keyEl = document.querySelector(`.shortcut-key[data-shortcut="${activeShortcutSlot}"]`);
+    if (keyEl) keyEl.textContent = target;
+
+    appModal.style.display = 'none';
+    customTarget.value = "";
+    triggerHaptic(ImpactStyle.Medium);
+  } catch (_) {
+    alert("Failed to save shortcut. Check connection.");
+  }
+};
 
 async function startApp() {
   await initCamera();
   addDeviceToList(location.hostname, "Hub (Primary)");
   // @ts-ignore
   globalThis.connectToPC(0);
+}
+
+// Issue 5 (client-side): Call /api/logout to revoke token server-side before clearing state.
+async function logout() {
+  const token = localStorage.getItem("gesturelink_token");
+  if (token) {
+    try {
+      await fetch(`${location.origin}/api/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+    } catch (_) { /* best effort */ }
+  }
+  localStorage.removeItem("gesturelink_token");
+  localStorage.removeItem("gesturelink_ip");
+  location.reload();
 }
 
 async function triggerHaptic(style: ImpactStyle = ImpactStyle.Light) {
@@ -374,27 +589,109 @@ function startVisionLoop() {
 
 function setupTouchpad() {
   let lastX = 0, lastY = 0, startTime = 0;
+  let lastTapTime = 0;
+  let maxFingers = 0;
+  let lastPinchDist = 0;
+  let isMoving = false;
+  let isDragging = false;
+  let isPinching = false;
+
   touchZone.addEventListener('touchstart', (e: any) => {
+    maxFingers = Math.max(maxFingers, e.touches.length);
     lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
     startTime = Date.now();
+    isMoving = false;
+    isPinching = false;
+
+    if (e.touches.length === 2) {
+      lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+
+    if (e.touches.length === 1 && (startTime - lastTapTime) < 300) {
+      isDragging = true;
+      if (activePC?.ws?.readyState === 1) {
+        activePC.ws.send(JSON.stringify({ type: 'click_down', button: 'left' }));
+      }
+    }
     e.preventDefault();
   }, { passive: false });
 
   touchZone.addEventListener('touchmove', (e: any) => {
-    const dx = e.touches[0].clientX - lastX;
-    const dy = e.touches[0].clientY - lastY;
-    lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-    if (activePC?.ws?.readyState === 1) activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
+    isMoving = true;
+    maxFingers = Math.max(maxFingers, e.touches.length);
+    
+    if (e.touches.length === 1 && !isDragging) {
+      const dx = e.touches[0].clientX - lastX;
+      const dy = e.touches[0].clientY - lastY;
+      lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      if (activePC?.ws?.readyState === 1) {
+        activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
+      }
+    } else if (e.touches.length === 1 && isDragging) {
+      const dx = e.touches[0].clientX - lastX;
+      const dy = e.touches[0].clientY - lastY;
+      lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      if (activePC?.ws?.readyState === 1) {
+        activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
+      }
+    } else if (e.touches.length === 2) {
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      
+      const delta = currentDist - lastPinchDist;
+      if (Math.abs(delta) > 5) {
+        isPinching = true;
+        if (activePC?.ws?.readyState === 1) {
+          activePC.ws.send(JSON.stringify({ type: 'zoom', delta }));
+        }
+        lastPinchDist = currentDist;
+      } else if (!isPinching) {
+        // Two-Finger Scroll as fallback if not pinching
+        const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const dy = currentY - lastY;
+        lastY = currentY;
+        if (activePC?.ws?.readyState === 1) {
+          activePC.ws.send(JSON.stringify({ type: 'scroll', dy: dy * -1.5 }));
+        }
+      }
+    }
     e.preventDefault();
   }, { passive: false });
 
   touchZone.addEventListener('touchend', (e: any) => {
-    if (Date.now() - startTime < 200) {
-      const fingers = e.changedTouches.length;
+    const now = Date.now();
+    const duration = now - startTime;
+
+    if (isDragging) {
+      isDragging = false;
       if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'click', button: fingers === 1 ? 'left' : 'right' }));
-        triggerHaptic(fingers === 1 ? ImpactStyle.Light : ImpactStyle.Medium);
+        activePC.ws.send(JSON.stringify({ type: 'click_up', button: 'left' }));
       }
+    } else if (duration < 250 && !isMoving) {
+      // Standard Tap (1 or 2 fingers)
+      if (activePC?.ws?.readyState === 1 && maxFingers < 3) {
+        const button = maxFingers === 2 ? 'right' : 'left';
+        activePC.ws.send(JSON.stringify({ type: 'click', button }));
+        triggerHaptic(maxFingers === 2 ? ImpactStyle.Medium : ImpactStyle.Light);
+      }
+      lastTapTime = now;
+    } else if (duration >= 1000 && !isMoving) {
+      // Long Hold (3 or 4 fingers)
+      if (activePC?.ws?.readyState === 1 && (maxFingers === 3 || maxFingers === 4)) {
+        activePC.ws.send(JSON.stringify({ type: 'shortcut', slot: `touch_${maxFingers}_finger` }));
+        triggerHaptic(ImpactStyle.Heavy);
+      }
+    } else {
+      lastTapTime = 0;
+    }
+
+    if (e.touches.length === 0) {
+      maxFingers = 0;
     }
   });
 }

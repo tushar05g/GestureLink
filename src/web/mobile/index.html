@@ -420,7 +420,31 @@
 <body>
   <div id="app">
     <!-- ONBOARDING OVERLAY -->
-    <div id="pairingOverlay" class="overlay">
+    <!-- App Selection Modal -->
+  <div id="appModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <h3 style="margin-bottom: 24px; font-weight: 800;">Configure Gesture</h3>
+      
+      <div style="margin-bottom: 24px;">
+        <label style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; color: var(--accent-primary); margin-bottom: 12px; display: block; text-transform: uppercase;">Discovered Applications</label>
+        <select id="appSelect" style="width: 100%; padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s;">
+          <option value="">-- Choose from device --</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 30px;">
+        <label style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 12px; display: block; text-transform: uppercase;">Or Custom Command / URL</label>
+        <input type="text" id="customTarget" placeholder="e.g. spotify, chrome, https://..." style="width: 100%; padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s;">
+      </div>
+
+      <div style="display: flex; gap: 12px;">
+        <button id="closeAppModal" class="btn btn-ghost" style="flex: 1;">Cancel</button>
+        <button id="saveAppShortcut" class="btn btn-primary" style="flex: 1;">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pairingOverlay" class="overlay">
       <div class="logo-pulse">G</div>
       <h2 style="font-size: 1.5rem; font-weight: 800; margin-bottom: 8px;">Connect to Hub</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">Enter the 6-digit PIN from your PC</p>
@@ -434,8 +458,9 @@
         <input type="number" class="pin-box" maxlength="1" pattern="\d*">
       </div>
 
-      <button id="pairBtn" class="btn btn-primary">Pair with Device</button>
-      <p id="pairError" style="color: var(--danger); font-size: 0.8rem; margin-top: 16px; opacity: 0;">Invalid PIN. Try again.</p>
+      <div id="pairStatusText" style="margin-top: 15px; font-size: 0.85rem; color: var(--accent); font-weight: 600; min-height: 1.2em;"></div>
+      <p id="pairError" style="color: var(--danger); font-size: 0.8rem; margin-top: 8px; opacity: 0; transition: opacity 0.3s;">⚠️ Invalid PIN or Request Denied</p>
+      <button id="pairBtn" class="btn btn-primary" style="margin-top: 20px;">Pair with Device</button>
     </div>
 
     <!-- HEADER -->
@@ -528,26 +553,25 @@
           <button id="saveBtn" class="btn btn-primary">Apply Settings</button>
         </div>
 
+
         <div class="card" style="margin-top: 16px;">
           <div class="card-title">Keyboard Shortcuts</div>
           <div id="shortcutList">
-            <div class="shortcut-row">
-              <span class="shortcut-label">✌️ Two Fingers → Screenshot</span>
-              <span class="shortcut-key" data-shortcut="screenshot">ctrl+shift+s</span>
-            </div>
-            <div class="shortcut-row">
-              <span class="shortcut-label">☝️ One Finger → Browser Back</span>
-              <span class="shortcut-key" data-shortcut="one_finger">alt+left</span>
-            </div>
-            <div class="shortcut-row">
+            <div class="shortcut-row" onclick="globalThis.editShortcut('three_fingers')">
               <span class="shortcut-label">🤟 Three Fingers → Mission Control</span>
               <span class="shortcut-key" data-shortcut="three_fingers">super+d</span>
             </div>
-            <div class="shortcut-row">
+            <div class="shortcut-row" onclick="globalThis.editShortcut('four_fingers')">
               <span class="shortcut-label">🤙 Four Fingers → Fullscreen</span>
               <span class="shortcut-key" data-shortcut="four_fingers">f11</span>
             </div>
           </div>
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+          <div class="card-title">Danger Zone</div>
+          <p style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 16px;">Disconnect from the current Hub and reset all pairing data.</p>
+          <button id="logoutBtn" class="btn btn-danger">Reset Session</button>
         </div>
       </section>
     </main>

@@ -35,9 +35,8 @@ class ShortcutManager:
     def __init__(self, config_path: str | None = None) -> None:
         self._config_path = Path(config_path or Path.home() / ".gesturelink_shortcuts.json")
         self._bindings: dict[str, ShortcutBinding] = {
-            "one_finger": ShortcutBinding(),
-            "two_fingers": ShortcutBinding(),
             "three_fingers": ShortcutBinding(),
+            "four_fingers": ShortcutBinding(),
         }
         self._app_cache: list[DiscoveredApp] | None = None
         self.load()
@@ -55,6 +54,11 @@ class ShortcutManager:
                 )
         except Exception as exc:
             logger.warning("Failed to load shortcut config (%s): %s", self._config_path, exc)
+
+    def get_available_apps(self, limit: int = 20) -> list[dict[str, str]]:
+        """Public list of discovered applications for UI selection."""
+        apps = self._discover_apps()[:limit]
+        return [{"name": app.name, "target": app.target} for app in apps]
 
     def save(self) -> None:
         payload = {
@@ -161,9 +165,8 @@ class ShortcutManager:
             return "GUI unavailable"
 
         labels = [
-            ("one_finger", "One Finger Quest"),
-            ("two_fingers", "Two Finger Quest"),
             ("three_fingers", "Three Finger Quest"),
+            ("four_fingers", "Four Finger Quest"),
         ]
         discovered = self._discover_apps()
         discovered_display = [f"{a.name} | {a.target}" for a in discovered]
@@ -367,9 +370,8 @@ class ShortcutManager:
         print("Choose discovered app, or enter an absolute path, command, or URL.\n")
 
         labels = [
-            ("one_finger", "One finger up"),
-            ("two_fingers", "Two fingers up"),
             ("three_fingers", "Three fingers up"),
+            ("four_fingers", "Four fingers up"),
         ]
 
         changed = False

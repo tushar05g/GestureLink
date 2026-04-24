@@ -12,11 +12,12 @@ from typing import Dict, Optional, Any, Annotated
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import qrcode
 import socket
+import websockets
 
 from src.core.config import CONFIG
 from src.core.controller import MouseController
@@ -77,6 +78,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     shortcuts = ShortcutManager()
     mouse = MouseController(CONFIG, shortcuts=shortcuts, responsive=True)
     
+    # Shared state — track live WebSocket sessions for the dashboard
+    connected_clients: Dict[str, dict] = {}
+
     # WebRTC Signaling Hub
     signals: Dict[str, asyncio.Queue] = {}
 
@@ -95,7 +99,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             signal = await asyncio.wait_for(signals[target_id].get(), timeout=30.0)
             return JSONResponse({"ok": True, "signal": signal})
         except asyncio.TimeoutError:
-            return JSONResponse({"ok": False, "error": "timeout"}, status_code=408)
+            # Issue 10: suppress 408 log spam — this is expected long-poll behaviour
+            return JSONResponse({"ok": False, "error": "timeout"}, status_code=200)
 
     @app.get("/health")
     async def health() -> JSONResponse:
@@ -105,6 +110,17 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def ping() -> JSONResponse:
         """Lightweight endpoint for network device discovery."""
         return JSONResponse({"ok": True, "hostname": socket.gethostname(), "ip": detect_lan_ip()})
+
+    @app.post("/api/validate-token")
+    async def validate_token_endpoint(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Let mobile verify its stored token is still valid after a server restart."""
+        token = payload.get("token")
+        valid = tokens.validate_token(token)
+        return JSONResponse({"valid": valid})
+
+    @app.get("/api/connected-clients")
+    async def get_connected_clients() -> JSONResponse:
+        return JSONResponse({"clients": list(connected_clients.values())})
 
     @app.get("/api/hub/info")
     async def hub_info() -> JSONResponse:
@@ -120,41 +136,98 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         return JSONResponse({"devices": discovery.discovered_devices})
 
     @app.get("/api/apps")
-    async def get_apps() -> JSONResponse:
-        # Platform-aware app list — Bug #9 fix
-        is_windows = platform.system() == "Windows"
-        apps = [
-            {"name": "Browser",   "target": "chrome" if is_windows else "google-chrome"},
-            {"name": "Terminal",  "target": "cmd" if is_windows else "gnome-terminal"},
-            {"name": "Spotify",   "target": "spotify"},
-            {"name": "VS Code",   "target": "code"},
-            {"name": "File Explorer", "target": "explorer" if is_windows else "nautilus"},
-        ]
+    async def get_apps(ip: Optional[str] = None) -> JSONResponse:
+        # If IP is provided and not local, proxy to agent
+        if ip and ip not in ("localhost", "127.0.0.1", detect_lan_ip()):
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(f"http://{ip}:8001/api/apps", timeout=2.0)
+                    return JSONResponse(resp.json())
+            except Exception as e:
+                logger.error("Proxy apps failed for %s: %s", ip, e)
+                return JSONResponse({"apps": [], "error": str(e)})
+        
+        # Default: local hub apps
+        apps = shortcuts.get_available_apps()
         return JSONResponse({"apps": apps})
 
     @app.get("/api/shortcuts")
     async def get_shortcuts() -> JSONResponse:
-        return JSONResponse({"shortcuts": shortcuts.get_all_shortcuts()})
+        return JSONResponse({"shortcuts": shortcuts.get_bindings()})
 
     @app.post("/api/shortcuts")
     async def set_shortcuts(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         new_shortcuts = payload.get("shortcuts", {})
-        shortcuts.update_shortcuts(new_shortcuts)
+        shortcuts.set_bindings(new_shortcuts)
         return JSONResponse({"ok": True})
 
     @app.post("/api/pair")
-    async def pair(payload: Annotated[dict, Body(...)]) -> JSONResponse:
-        if payload.get("pin") == tokens.current_pin:
-            token = tokens.generate_token(client_ip="local")
-            return JSONResponse({"ok": True, "token": token})
-        return JSONResponse({"ok": False, "error": "Invalid PIN"}, status_code=401)
+    async def initiate_pair(request: Request, payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        pin = payload.get("pin")
+        hostname = payload.get("hostname", "Unknown Phone")
+        client_ip = request.client.host if request.client else "0.0.0.0"
+
+        if pin != tokens.current_pin:
+            return JSONResponse({"status": "error", "error": "Invalid PIN"}, status_code=401)
+
+        # ALWAYS go through pending approval — never silently re-trust.
+        # Remove from trusted so the user always consciously approves.
+        security.trusted_ips.discard(client_ip)
+        req_id = security.add_pending_request(client_ip, hostname)
+        logger.info("Pair request from %s (%s) → pending ID %s", client_ip, hostname, req_id)
+        return JSONResponse({"status": "pending", "request_id": req_id})
+
+    @app.get("/api/pair/status/{request_id}")
+    async def check_pair_status(request_id: str, request: Request) -> JSONResponse:
+        client_ip = request.client.host if request.client else "0.0.0.0"
+        token = security.get_token_for_ip(client_ip)
+
+        if token:
+            return JSONResponse({"status": "approved", "token": token})
+
+        if request_id in security.pending_requests:
+            return JSONResponse({"status": "pending"})
+
+        return JSONResponse({"status": "rejected"})
+
+    @app.post("/api/logout")
+    async def logout(request: Request, payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Issue 5: Invalidate token server-side so it cannot be reused."""
+        token = payload.get("token")
+        if token and token in tokens.valid_tokens:
+            del tokens.valid_tokens[token]
+            logger.info("Token revoked for IP %s", tokens.valid_tokens.get(token, "unknown"))
+        return JSONResponse({"ok": True})
+
+    @app.get("/api/security/pending")
+    async def get_pending_requests() -> JSONResponse:
+        return JSONResponse({"pending": list(security.pending_requests.values())})
+
+    @app.post("/api/security/approve")
+    async def approve_pairing(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        req_id = payload.get("id")
+        req = security.pending_requests.get(req_id)
+        if not req:
+             return JSONResponse({"ok": False, "error": "Request not found"}, status_code=404)
+        
+        token = tokens.generate_token(req["ip"])
+        if security.approve_request(req_id, token):
+            return JSONResponse({"ok": True})
+        return JSONResponse({"ok": False})
+
+    @app.post("/api/security/reject")
+    async def reject_pairing(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        req_id = payload.get("id")
+        security.reject_request(req_id)
+        return JSONResponse({"ok": True})
 
     @app.get("/api/security")
     async def get_security() -> JSONResponse:
         return JSONResponse({
             "trusted": list(security.trusted_ips),
             "blocked": list(security.blocked_ips),
-            "pending": list(security.pending_approvals.keys())
+            "pending": list(security.pending_requests.values())
         })
 
     @app.post("/api/security/action")
@@ -164,11 +237,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         if action == "trust":
             security.trusted_ips.add(ip)
             security.blocked_ips.discard(ip)
-            if ip in security.pending_approvals: security.pending_approvals[ip].set()
         elif action == "block":
             security.blocked_ips.add(ip)
             security.trusted_ips.discard(ip)
-            if ip in security.pending_approvals: security.pending_approvals[ip].set()
         security.save()
         return JSONResponse({"ok": True})
 
@@ -189,39 +260,134 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         return JSONResponse({"ok": True})
 
     @app.websocket("/ws")
-    async def websocket_endpoint(ws: WebSocket, token: Annotated[Optional[str], Query()] = None):
+    async def websocket_endpoint(ws: WebSocket, token: Annotated[Optional[str], Query()] = None, target: Optional[str] = Query(None)):
+        client_ip = ws.client.host if ws.client else "unknown"
+        local_ip = detect_lan_ip()
+        logger.info("WS connect: client=%s, token=%s..., target=%s, local_ip=%s",
+                    client_ip, (token or "")[:8], target, local_ip)
+
+        # Token validation IS the security gate.
         if not tokens.validate_token(token):
+            logger.warning("WS rejected: invalid token from %s", client_ip)
             await ws.close(code=4003)
             return
-        client_ip = ws.client.host if ws.client else "unknown"
-        if not await security.request_consent(client_ip):
-            await ws.close(code=1008)
-            return
+
         await ws.accept()
+        logger.info("WS accepted: client=%s", client_ip)
+
+        # AGENT RELAY LOGIC
+        if target and target != local_ip:
+            logger.info("RELAY PATH: proxying %s -> Agent %s", client_ip, target)
+            agent_url = f"ws://{target}:8001/ws?token=hub_internal"
+            try:
+                async with websockets.connect(agent_url) as agent_ws:
+                    async def mobile_to_agent():
+                        try:
+                            while True:
+                                data = await ws.receive()
+                                if data.get("type") == "websocket.disconnect":
+                                    break
+                                if "text" in data:
+                                    await agent_ws.send(data["text"])
+                                elif "bytes" in data:
+                                    await agent_ws.send(data["bytes"])
+                        except Exception:
+                            pass
+                        finally:
+                            await agent_ws.close()
+
+                    async def agent_to_mobile():
+                        try:
+                            async for message in agent_ws:
+                                if isinstance(message, str):
+                                    await ws.send_text(message)
+                                else:
+                                    await ws.send_bytes(message)
+                        except Exception:
+                            pass
+                        finally:
+                            try:
+                                await ws.close()
+                            except Exception:
+                                pass
+
+                    await asyncio.gather(mobile_to_agent(), agent_to_mobile())
+            except Exception as e:
+                logger.error("Failed to proxy to agent %s: %s", target, e)
+                try:
+                    # Tell the mobile UI the agent is unreachable
+                    await ws.send_text(json.dumps({"type": "error", "message": f"Agent {target} is unreachable"}))
+                except Exception:
+                    pass
+                await ws.close()
+            return
+
+        # LOCAL HUB LOGIC — register as connected
+        logger.info("LOCAL PATH: client=%s entering local hub control loop", client_ip)
+        import time
+        connected_clients[client_ip] = {
+            "ip": client_ip,
+            "connected_at": int(time.time()),
+            "type": "mobile"
+        }
+        logger.info("Client connected: %s", client_ip)
+        async def vision_worker():
+            try:
+                while True:
+                    msg = await ws.receive()
+                    if "bytes" in msg:
+                        # Process vision in a background task so it doesn't block the loop
+                        asyncio.create_task(_handle_vision_frame(ws, msg["bytes"], vision, mouse))
+                    elif "text" in msg:
+                        await _handle_ws_message(ws, msg, vision, mouse)
+            except WebSocketDisconnect:
+                pass
+            except Exception as e:
+                if "receive" not in str(e): # Suppress noisy disconnect errors
+                    logger.error("WS Loop Error: %s", e)
+
         try:
-            while True:
-                msg = await ws.receive()
-                if "bytes" in msg:
-                    frame = vision.decode_frame(msg["bytes"])
-                    if frame is not None:
-                        state = await vision.process_frame(frame)
-                        status = mouse.update(state)
-                        await ws.send_json({"status": status})
-                elif "text" in msg:
-                    data = json.loads(msg["text"])
-                    mtype = data.get("type")
-                    # Bug #5: accept both 'touch' and 'move' for touchpad compatibility
-                    if mtype in ("touch", "move"):
-                        res = mouse.handle_touch_move(data.get("dx", 0), data.get("dy", 0))
-                        await ws.send_json({"status": res})
-                    elif mtype == "click":
-                        res = mouse.handle_click(data.get("button", "left"))
-                        await ws.send_json({"status": res})
-                    elif mtype == "scroll":
-                        res = mouse.handle_touch_scroll(data.get("dy", 0))
-                        await ws.send_json({"status": res})
-        except WebSocketDisconnect: pass
-        except Exception as e: logger.error("WS Error: %s", e)
+            await vision_worker()
+        finally:
+            connected_clients.pop(client_ip, None)
+            logger.info("Client disconnected: %s", client_ip)
+
+    async def _handle_vision_frame(ws, frame_bytes, vision, mouse):
+        frame = vision.decode_frame(frame_bytes)
+        if frame is not None:
+            # This might still be slow, but it's now in its own task!
+            state = await vision.process_frame(frame)
+            status = mouse.update(state)
+            try:
+                await ws.send_json({"status": status, "type": "gesture"})
+            except: pass
+
+    async def _handle_ws_message(ws, msg, vision, mouse):
+        try:
+            data = json.loads(msg["text"])
+        except json.JSONDecodeError:
+            return
+        mtype = data.get("type")
+        
+        if mtype in ("touch", "move"):
+            res = mouse.handle_touch_move(float(data.get("dx", 0)), float(data.get("dy", 0)))
+            await ws.send_json({"status": res})
+        elif mtype == "click":
+            res = mouse.handle_click(data.get("button", "left"))
+            await ws.send_json({"status": res})
+        elif mtype in ("click_down", "click_up"):
+            is_down = (mtype == "click_down")
+            res = mouse.handle_click_state(data.get("button", "left"), is_down)
+            await ws.send_json({"status": res})
+        elif mtype == "scroll":
+            res = mouse.handle_touch_scroll(float(data.get("dy", 0)))
+            await ws.send_json({"status": res})
+        elif mtype == "zoom":
+            res = mouse.handle_touch_zoom(float(data.get("delta", 0)))
+            await ws.send_json({"status": res})
+        elif mtype == "shortcut":
+            res = mouse.handle_touch_shortcut(data.get("slot", ""))
+            await ws.send_json({"status": res})
 
     # Static Assets
     if MOBILE_DIST.exists():
@@ -232,9 +398,28 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         async def manifest(): return FileResponse(MOBILE_DIST / "manifest.json")
         @app.get("/sw.js")
         async def sw(): return FileResponse(MOBILE_DIST / "sw.js")
+        @app.get("/icon-192.png")
+        async def icon192(): return FileResponse(MOBILE_DIST / "icon-192.png")
+        @app.get("/icon-512.png")
+        async def icon512(): return FileResponse(MOBILE_DIST / "icon-512.png")
     
     @app.get("/hub")
-    async def hub_page(): return FileResponse(HUB_HTML)
+    async def hub_page():
+        content = HUB_HTML.read_text()
+        info = {
+            "pin": tokens.current_pin,
+            "lan_ip": detect_lan_ip(),
+            "port": port,
+            "ngrok_url": os.getenv("NGROK_URL")
+        }
+        # Fix: assign to window.infoData so fetchUpdates() can read it across the script
+        injection = f"window.infoData = {json.dumps(info)};"
+        injection += "\ndocument.addEventListener('DOMContentLoaded', () => {"
+        injection += f"\n  document.getElementById('pin-display').textContent = '{tokens.current_pin}';"
+        injection += "\n});"
+        
+        content = content.replace("/*INFO_INJECTION*/", injection)
+        return HTMLResponse(content)
 
     @app.get("/lan-qr.png")
     async def qr_gen(url: Optional[str] = None) -> StreamingResponse:
