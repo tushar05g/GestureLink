@@ -67,6 +67,7 @@ class GLWindow:
         webcam_frame:   Optional[np.ndarray],
         status:         str,
         pinky_progress: float,
+        mode_str:       Optional[str] = None,
     ) -> None:
         if not self._open or not self._renderer:
             return
