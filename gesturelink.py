@@ -62,7 +62,8 @@ def main():
             run_command(["installers/hub/install.py"])
         
     elif args.command == "builder":
-        print("🧱 Builder Mode is currently in Research Phase. See builder_mode_research.md")
+        print("🧱 Starting GestureLink Builder (2D Isometric Mode)...")
+        run_command(["run.py"])
         
     else:
         parser.print_help()
