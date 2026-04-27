@@ -102,6 +102,19 @@ def _draw_productivity_overlay(frame, vision, status, fps, cfg):
                     (12, h - 15 - (len(legend) - 1 - i) * 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150,150,150), 1, cv2.LINE_AA)
 
+def _draw_builder_overlay(frame, vision, builder, status, fps, cfg):
+    h, w = frame.shape[:2]
+    frame_disp = cv2.flip(frame, 1)
+    builder.render(frame_disp)
+    _draw_landmarks(frame_disp, vision.last_landmarks, mirrored=True)
+    cv2.rectangle(frame_disp, (10, 10), (300, 55), (20, 20, 20), -1)
+    cv2.rectangle(frame_disp, (10, 10), (300, 55), (0, 200, 255), 1)
+    cv2.putText(frame_disp, f"Builder: {status}", (18, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 200, 255), 2, cv2.LINE_AA)
+    cv2.rectangle(frame_disp, (w//2-130, 8), (w//2+130, 48), (20,20,20), -1)
+    cv2.rectangle(frame_disp, (w//2-130, 8), (w//2+130, 48), (255,100,50), 1)
+    cv2.putText(frame_disp, "BUILDER MODE", (w//2-90, 34),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255,100,50), 2, cv2.LINE_AA)
     return frame_disp
 
 
@@ -149,34 +162,9 @@ def run() -> None:
             # --- Vision (pass builder flag for correct classifier) ---
             gs = vision.process_frame(frame, builder_mode=(mode == AppMode.BUILDER))
 
-            # --- Mode switch ---
             if gs.mode_switch:
                 mode = AppMode.BUILDER if mode == AppMode.PRODUCTIVITY else AppMode.PRODUCTIVITY
                 logger.info("Switched to %s", mode.name)
-
-                if mode == AppMode.BUILDER:
-                    # Open GL window
-                    try:
-                        from gl_window import GLWindow
-                        gl_win = GLWindow(cfg, builder.world)
-                        if gl_win.open():
-                            builder.camera = gl_win._renderer.camera
-                        else:
-                            logger.error("GL window failed — staying in Productivity")
-                            mode = AppMode.PRODUCTIVITY
-                            gl_win = None
-                    except Exception as e:
-                        logger.error("GL init error: %s", e)
-                        mode = AppMode.PRODUCTIVITY
-                        gl_win = None
-                else:
-                    if gl_win:
-                        gl_win.close()
-                        gl_win = None
-                    builder.camera = None
-
-                _thumb_pinch_start = None
-                _thumb_pinch_held  = False
 
             # --- FPS ---
             now = time.perf_counter()
@@ -194,53 +182,13 @@ def run() -> None:
 
             # ---- Builder Mode -------------------------------------------
             else:
-                nx = gs.cursor_x
-                ny = gs.cursor_y
-                fw, fh = cc.frame_width, cc.frame_height
-
-                # Thumb pinch = move cube/group
-                if gs.thumb_pinch_active:
-                    if not _thumb_pinch_held:
-                        _thumb_pinch_start = (nx, ny)
-                        _thumb_pinch_held  = True
-                    status = builder.handle_thumb_pinch_drag(
-                        nx, ny, fw, fh,
-                        drag_start_norm=_thumb_pinch_start,
-                        is_dragging=True,
-                    )
-                else:
-                    if _thumb_pinch_held:
-                        builder.handle_thumb_pinch_drag(
-                            nx, ny, fw, fh,
-                            drag_start_norm=_thumb_pinch_start,
-                            is_dragging=False,
-                        )
-                    _thumb_pinch_held  = False
-                    _thumb_pinch_start = None
-                    status = builder.update(
-                        gs.gesture.value, nx, ny, fw, fh, gs
-                    )
-
-                # Render GL frame
-                if gl_win and gl_win.is_open():
-                    selected_set = set(builder.world.selected_group)
-                    pinky_prog   = vision._pinky_hold_frames / vision._PINKY_HOLD_REQUIRED
-                    gl_win.render_frame(
-                        ghost        = builder.ghost,
-                        erase_ghost  = builder.erase_ghost,
-                        selected_set = selected_set,
-                        webcam_frame = frame,
-                        status       = status,
-                        mode_str     = "BUILDER MODE",
-                        pinky_progress = pinky_prog,
-                    )
-                else:
-                    # GL window closed externally — return to productivity
-                    mode = AppMode.PRODUCTIVITY
-                    gl_win = None
-
-                # Keep CV window alive for Q to quit
-                cv2.waitKey(1)
+                nx, ny = gs.cursor_x, gs.cursor_y
+                status = builder.update(gs.gesture.value, nx, ny, cc.frame_width, cc.frame_height, gs)
+                frame_disp = _draw_builder_overlay(frame, vision, builder, status, fps, cfg)
+                cv2.imshow(oc.window_title, frame_disp)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
+                    break
 
     except KeyboardInterrupt:
         logger.info("Interrupted.")
