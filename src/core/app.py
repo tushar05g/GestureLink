@@ -159,12 +159,8 @@ def run() -> None:
             if not ret:
                 continue
 
-            # --- Vision (pass builder flag for correct classifier) ---
+            # --- Vision ---
             gs = vision.process_frame(frame, builder_mode=(mode == AppMode.BUILDER))
-
-            if gs.mode_switch:
-                mode = AppMode.BUILDER if mode == AppMode.PRODUCTIVITY else AppMode.PRODUCTIVITY
-                logger.info("Switched to %s", mode.name)
 
             # --- FPS ---
             now = time.perf_counter()

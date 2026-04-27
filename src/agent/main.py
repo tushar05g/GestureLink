@@ -7,6 +7,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 import uvicorn
 from zeroconf import IPVersion, ServiceInfo, Zeroconf
 import argparse
+import sys
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="GestureLink Micro-Agent")
@@ -51,6 +53,9 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
     frac_x = 0.0
     frac_y = 0.0
     
+    # Builder process management
+    builder_process = None
+
     try:
         while True:
             msg = await ws.receive()
@@ -58,7 +63,21 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
                 try:
                     data = json.loads(msg["text"])
                     mtype = data.get("type")
-                    if mtype in ("touch", "move"):
+                    if mtype == "toggle_app":
+                        import subprocess
+                        mode = data.get("mode", "productivity")
+                        if builder_process and builder_process.poll() is None:
+                            builder_process.terminate()
+                            builder_process = None
+                            logging.info(f"Remote: Closed Gesture App")
+                        else:
+                            # Start with --mode flag
+                            cmd = [sys.executable, "run.py"]
+                            if mode == "builder":
+                                cmd.append("--builder") # We'll add this flag to run.py
+                            builder_process = subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parent.parent.parent))
+                            logging.info(f"Remote: Launched Gesture App in {mode} mode")
+                    elif mtype in ("touch", "move"):
                         dx, dy = float(data.get("dx", 0)), float(data.get("dy", 0))
                         
                         # Accumulate the fractional movements
@@ -142,11 +161,11 @@ async def shutdown():
                 logging.warning(f"Zeroconf shutdown error: {e}")
         await loop.run_in_executor(None, unregister)
 
+def start_agent(port=8001):
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8001)
-    parser.add_argument("--secret", type=str, default="")
     args = parser.parse_args()
-    
-    SECRET_TOKEN = args.secret
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    start_agent(port=args.port)

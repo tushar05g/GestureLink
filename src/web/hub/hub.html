@@ -305,20 +305,23 @@
     <main>
         <section id="overview" class="section active">
             <div class="header-row">
-                <div>
                     <h2>System Overview</h2>
                     <p style="color: var(--text-secondary); font-size: 0.9rem;">Hub Status: <span style="color: var(--accent)">● Active Monitoring</span></p>
                 </div>
-                <button onclick="document.getElementById('qr-modal').style.display='flex'" class="btn btn-primary">+ Pair Mobile</button>
+                <div style="display:flex; gap:12px;">
+                    <button id="btn-toggle-cam" onclick="toggleHubCamera()" class="btn">📸 Start Hub Camera</button>
+                    <button id="btn-toggle-builder" onclick="toggleHubBuilder()" class="btn">🧱 Builder Mode: OFF</button>
+                    <button onclick="document.getElementById('qr-modal').style.display='flex'" class="btn btn-primary">+ Pair Mobile</button>
+                </div>
             </div>
 
             <div class="grid">
                 <section class="card" style="grid-column: span 2;">
-                    <h3><div class="status-dot active"></div> Live Gesture Stream</h3>
+                    <h3><div class="status-dot active"></div> Hub Camera Live Feed</h3>
                     <div class="video-container">
-                        <video id="webrtc-video" autoplay playsinline></video>
+                        <img id="hub-frame-stream" style="width:100%; height:100%; object-fit:cover; display:none;">
                         <div id="video-placeholder" class="video-placeholder">
-                            Waiting for Mobile Stream...
+                            Camera Offline. Click "Start Hub Camera" to begin.
                         </div>
                     </div>
                 </section>
@@ -497,7 +500,11 @@
                         <div style="font-weight: 600; font-size: 0.9rem;">${agents[ip]}</div>
                         <div style="font-size: 0.7rem; color: var(--text-secondary);">${ip}</div>
                     </div>
-                    <button class="btn btn-ghost" style="padding: 6px 12px; font-size: 0.7rem;" onclick="secAction('${ip}', 'trust')">Connect</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-ghost" style="padding: 6px 12px; font-size: 0.7rem; border-color: var(--accent); color: var(--accent);" onclick="launchApp('${ip}', 'builder')">🧱 Builder</button>
+                        <button class="btn btn-ghost" style="padding: 6px 12px; font-size: 0.7rem; border-color: var(--good); color: var(--good);" onclick="launchApp('${ip}', 'productivity')">⚡ Gestures</button>
+                        <button class="btn btn-ghost" style="padding: 6px 12px; font-size: 0.7rem;" onclick="secAction('${ip}', 'trust')">Connect</button>
+                    </div>
                 </div>
             `).join('');
         }
@@ -511,73 +518,66 @@
             fetchUpdates();
         }
 
-        // WebRTC & Vision Relay
-        let peerConn = null;
-        let localWS = null;
-        const video = document.getElementById('webrtc-video');
+        async function launchApp(ip, mode) {
+            await fetch('/api/agent/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip, type: 'toggle_app', mode })
+            });
+        }
+
+        async function toggleHubCamera() {
+            const res = await fetch('/api/hub/toggle-camera');
+            const data = await res.json();
+            const btn = document.getElementById('btn-toggle-cam');
+            if (data.active) {
+                btn.textContent = '🛑 Stop Hub Camera';
+                btn.style.borderColor = 'var(--danger)';
+            } else {
+                btn.textContent = '📸 Start Hub Camera';
+                btn.style.borderColor = 'var(--border)';
+            }
+        }
+
+        async function toggleHubBuilder() {
+            const res = await fetch('/api/hub/toggle-builder');
+            const data = await res.json();
+            const btn = document.getElementById('btn-toggle-builder');
+            if (data.builder_active) {
+                btn.textContent = '🧱 Builder Mode: ON';
+                btn.style.borderColor = 'var(--accent)';
+                btn.style.color = 'var(--accent)';
+            } else {
+                btn.textContent = '🧱 Builder Mode: OFF';
+                btn.style.borderColor = 'var(--border)';
+                btn.style.color = 'var(--text-primary)';
+            }
+        }
+
+        // Hub Dashboard Frame Stream
+        let dashboardWS = null;
+        const hubStreamImg = document.getElementById('hub-frame-stream');
         const placeholder = document.getElementById('video-placeholder');
 
-        function initLocalWS() {
-            const proto = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            localWS = new WebSocket(`${proto}//${globalThis.location.host}/ws?token=hub_internal`);
-            localWS.onclose = () => setTimeout(initLocalWS, 2000);
+        function initDashboardWS() {
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            dashboardWS = new WebSocket(`${proto}//${window.location.host}/ws/dashboard`);
+            
+            dashboardWS.onmessage = (evt) => {
+                const msg = JSON.parse(evt.data);
+                if (msg.type === "hub_frame") {
+                    hubStreamImg.src = "data:image/jpeg;base64," + msg.data;
+                    hubStreamImg.style.display = 'block';
+                    placeholder.style.display = 'none';
+                }
+            };
+
+            dashboardWS.onclose = () => {
+                setTimeout(initDashboardWS, 2000);
+            };
         }
 
-        async function relayFrames() {
-            if (video.paused || video.ended || !localWS || localWS.readyState !== 1) {
-                requestAnimationFrame(relayFrames);
-                return;
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = 640; canvas.height = 480;
-            canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
-            canvas.toBlob(blob => {
-                if (blob) blob.arrayBuffer().then(buf => localWS.send(buf));
-                setTimeout(() => requestAnimationFrame(relayFrames), 33);
-            }, 'image/jpeg', 0.5);
-        }
-
-        async function pollSignals() {
-            while (true) {
-                try {
-                    const res = await fetch('/api/webrtc/signal/hub_pc');
-                    const data = await res.json();
-                    if (data.ok && data.signal) {
-                        const signal = data.signal;
-                        if (signal.type === "offer") {
-                            if (peerConn) peerConn.close();
-                            peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-                            peerConn.ontrack = e => {
-                                video.srcObject = e.streams[0];
-                                placeholder.style.display = 'none';
-                                relayFrames();
-                            };
-                            peerConn.onicecandidate = e => {
-                                if (e.candidate) fetch(`/api/webrtc/signal/${signal.from}`, {
-                                    method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({ type: "candidate", candidate: e.candidate })
-                                });
-                            };
-                            await peerConn.setRemoteDescription(new RTCSessionDescription(signal));
-                            const answer = await peerConn.createAnswer();
-                            await peerConn.setLocalDescription(answer);
-                            fetch(`/api/webrtc/signal/${signal.from}`, {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ type: "answer", sdp: answer.sdp })
-                            });
-                        } else if (signal.type === "candidate" && peerConn) {
-                            await peerConn.addIceCandidate(new RTCIceCandidate(signal.candidate));
-                        }
-                    }
-                } catch (e) {}
-                await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-
-        initLocalWS();
-        pollSignals();
+        initDashboardWS();
         fetchUpdates().then(() => {
             // Issue 3: poll every 1s so pair requests appear within 1 second
             setInterval(fetchUpdates, 1000);

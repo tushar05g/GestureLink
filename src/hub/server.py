@@ -135,6 +135,93 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def get_discovered() -> JSONResponse:
         return JSONResponse({"devices": discovery.discovered_devices})
 
+    # Hub-side Local Vision State
+    hub_camera_active = False
+    builder_mode_active = False
+    hub_cap = None
+    hub_builder = None 
+
+    @app.get("/api/hub/toggle-camera")
+    async def toggle_hub_camera():
+        nonlocal hub_camera_active, hub_cap, hub_builder
+        hub_camera_active = not hub_camera_active
+        if hub_camera_active and not hub_builder:
+            from src.core.modes import BuilderController
+            hub_builder = BuilderController(CONFIG)
+        return {"active": hub_camera_active}
+
+    @app.get("/api/hub/toggle-builder")
+    async def toggle_hub_builder():
+        nonlocal builder_mode_active
+        builder_mode_active = not builder_mode_active
+        return {"builder_active": builder_mode_active}
+
+    # Dashbord Frame Relay
+    dashboard_clients: Set[WebSocket] = set()
+
+    async def hub_vision_loop():
+        nonlocal hub_cap
+        while True:
+            if hub_camera_active:
+                if hub_cap is None:
+                    import cv2
+                    hub_cap = cv2.VideoCapture(0)
+                ret, frame = hub_cap.read()
+                if ret:
+                    gs = vision.process_frame(frame, builder_mode=builder_mode_active)
+                    
+                    if builder_mode_active and hub_builder:
+                        hub_builder.update(gs.gesture.value, gs.cursor_x, gs.cursor_y, 640, 480, gs)
+                        hub_builder.render(frame)
+                    else:
+                        for agent_ip in list(discovery.discovered_devices.keys()):
+                            try:
+                                agent_url = f"ws://{agent_ip}:8001/ws?token=hub_internal"
+                                async with websockets.connect(agent_url) as ws:
+                                    payload = {
+                                        "type": "move" if gs.gesture.value == "POINTING" else "scroll",
+                                        "dx": gs.cursor_x * 10 - 5,
+                                        "dy": gs.cursor_y * 10 - 5
+                                    }
+                                    if gs.gesture.value == "PINCH":
+                                        payload = {"type": "click", "button": "left"}
+                                    await ws.send(json.dumps(payload))
+                            except: pass
+
+                    # ENCODE AND STREAM TO DASHBOARD
+                    import cv2
+                    import base64
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+                    frame_b64 = base64.b64encode(buffer).decode('utf-8')
+                    
+                    # Broadcast to all open dashboard tabs
+                    for ws in list(dashboard_clients):
+                        try:
+                            await ws.send_text(json.dumps({"type": "hub_frame", "data": frame_b64}))
+                        except:
+                            dashboard_clients.discard(ws)
+
+                await asyncio.sleep(0.01)
+            else:
+                if hub_cap:
+                    hub_cap.release()
+                    hub_cap = None
+                await asyncio.sleep(0.5)
+
+    @app.websocket("/ws/dashboard")
+    async def dashboard_ws(ws: WebSocket):
+        await ws.accept()
+        dashboard_clients.add(ws)
+        try:
+            while True:
+                await ws.receive_text()
+        except:
+            dashboard_clients.discard(ws)
+
+    @app.on_event("startup")
+    async def start_vision_relay():
+        asyncio.create_task(hub_vision_loop())
+
     @app.get("/api/apps")
     async def get_apps(ip: Optional[str] = None) -> JSONResponse:
         # If IP is provided and not local, proxy to agent
@@ -147,6 +234,22 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             except Exception as e:
                 logger.error("Proxy apps failed for %s: %s", ip, e)
                 return JSONResponse({"apps": [], "error": str(e)})
+
+    @app.post("/api/agent/command")
+    async def agent_command(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        ip = payload.get("ip")
+        cmd_type = payload.get("type")
+        if not ip or not cmd_type:
+            return JSONResponse({"ok": False, "error": "Missing IP or type"}, status_code=400)
+        
+        agent_url = f"ws://{ip}:8001/ws?token=hub_internal"
+        try:
+            async with websockets.connect(agent_url) as ws:
+                await ws.send(json.dumps(payload))
+                return JSONResponse({"ok": True})
+        except Exception as e:
+            logger.error("Failed to send command to agent %s: %s", ip, e)
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
         
         # Default: local hub apps
         apps = shortcuts.get_available_apps()
@@ -464,20 +567,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     return app
 
-def run():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-    
+def start_hub(host="0.0.0.0", port=8000):
     project_root = Path(__file__).resolve().parent.parent.parent
     cert = project_root / "cert.pem"
     key  = project_root / "key.pem"
     ssl = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)} if cert.exists() else {}
     
-    app = build_app(args.host, args.port)
-    uvicorn.run(app, host=args.host, port=args.port, **ssl)
+    app = build_app(host, port)
+    uvicorn.run(app, host=host, port=port, **ssl)
 
 if __name__ == "__main__":
-    run()
+    start_hub()

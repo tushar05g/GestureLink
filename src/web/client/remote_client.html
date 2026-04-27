@@ -288,16 +288,10 @@
         <p class="small" style="margin-bottom: 12px;">The PC serving this page.</p>
         <button onclick="addCurrentPC()" style="width: 100%;">Connect to This PC</button>
 
-        <h3 style="margin-top: 24px;">Network Scan</h3>
-        <div class="btnrow">
-          <button onclick="scanNetwork()" id="scanBtn">Scan Wi-Fi</button>
-          <button class="secondary" onclick="addManualDevice()">Add IP</button>
-        </div>
-        <div id="scanStatus" class="small" style="margin-top: 10px;"></div>
-
-        <h3 style="margin-top: 24px;">Connections (Max 2)</h3>
-        <div id="deviceList">
-          <p class="small">No devices connected.</p>
+        <h3 style="margin-top: 24px;">Switch Active PC</h3>
+        <p class="small" style="margin-bottom: 12px;">Discovered on Hub network:</p>
+        <div id="hubAgentList" class="status">
+          <div class="empty-state">Fetching Hub agents...</div>
         </div>
       </article>
     </div>
@@ -457,6 +451,42 @@
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
       document.getElementById(id + "Tab").classList.add("active");
       document.getElementById("tab" + id.charAt(0).toUpperCase() + id.slice(1)).classList.add("active");
+      if (id === 'devices') fetchHubAgents();
+    }
+
+    async function fetchHubAgents() {
+      const container = document.getElementById('hubAgentList');
+      try {
+        const res = await fetch('/api/discovered');
+        const data = await res.json();
+        const ips = Object.keys(data.devices);
+        if (ips.length === 0) {
+          container.innerHTML = '<div class="empty-state">No agents found on Hub.</div>';
+          return;
+        }
+        container.innerHTML = ips.map(ip => `
+          <div class="device-item ${activePC?.ip === ip ? 'active' : ''}">
+            <div style="text-align:left"><strong>${data.devices[ip]}</strong><br/><span class="small">${ip}</span></div>
+            <button onclick="switchTarget('${ip}')">${activePC?.ip === ip ? 'Active' : 'Control'}</button>
+          </div>
+        `).join('');
+      } catch (e) { container.innerHTML = 'Error fetching agents.'; }
+    }
+
+    async function switchTarget(ip) {
+       // Disconnect current
+       if (activePC && activePC.ws) activePC.ws.close();
+       
+       // Create dummy device entry if needed
+       let d = devices.find(x => x.ip === ip);
+       if (!d) {
+          d = { ip, hostname: "Agent PC", ws: null };
+          devices.push(d);
+       }
+       
+       // Re-use connectToPC logic
+       const idx = devices.indexOf(d);
+       connectToPC(idx);
     }
 
     function addCurrentPC() {

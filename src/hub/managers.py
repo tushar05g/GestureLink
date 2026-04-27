@@ -156,9 +156,8 @@ class DeviceDiscovery(ServiceListener):
         if info and info.addresses:  # Bug #4: guard against empty addresses
             ip = socket.inet_ntoa(info.addresses[0])
             hostname = name.split(".")[0]
-            if ip != detect_lan_ip():
-                self.discovered_devices[ip] = hostname
-                logger.info("Zeroconf: Discovered Agent: %s at %s", hostname, ip)
+            self.discovered_devices[ip] = hostname
+            logger.info("Zeroconf: Discovered Agent: %s at %s", hostname, ip)
 
     def stop(self) -> None:
         if self.info:

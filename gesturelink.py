@@ -5,68 +5,50 @@ Launch and manage your AI-powered gesture control suite.
 """
 import sys
 import argparse
-import subprocess
 import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-
-def run_command(cmd_args, cwd=None):
-    try:
-        subprocess.run([sys.executable] + cmd_args, cwd=cwd or str(PROJECT_ROOT))
-    except KeyboardInterrupt:
-        print("\nExiting...")
-    except Exception as e:
-        print(f"Error: {e}")
+sys.path.append(str(PROJECT_ROOT))
 
 def main():
     parser = argparse.ArgumentParser(description="GestureLink Suite Control")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-
-    # HUB
-    subparsers.add_parser("hub", help="Launch the GestureLink Hub (Dashboard)")
+    parser.add_argument("command", nargs="?", choices=["hub", "agent", "builder", "tray", "install"], help="Command to run")
+    parser.add_argument("--builder", action="store_true", help="Start directly in Builder Mode")
     
-    # AGENT
-    subparsers.add_parser("agent", help="Launch the GestureLink Agent (Remote PC)")
-    
-    # TRAY
-    subparsers.add_parser("tray", help="Launch the System Tray controller")
-
-    # INSTALL
-    subparsers.add_parser("install", help="Run the cross-platform installer")
-
-    # BUILDER (Placeholder)
-    subparsers.add_parser("builder", help="Research mode: Builder Mode (Research Phase)")
-
     args = parser.parse_args()
 
+    # Add project root to sys.path so imports work
+    os.chdir(str(PROJECT_ROOT))
+
     if args.command == "hub":
-        print("🚀 Starting GestureLink Hub...")
-        run_command(["-m", "src.hub.server"])
+        print("[HUB] Starting GestureLink Hub Dashboard...")
+        from src.hub.server import start_hub
+        start_hub()
     
     elif args.command == "agent":
-        print("🛰 Starting GestureLink Agent...")
-        run_command(["-m", "src.agent.main"])
+        print("[AGENT] Starting GestureLink Remote Agent...")
+        from src.agent.main import start_agent
+        start_agent()
+        
+    elif args.command == "builder" or args.builder:
+        print("[BUILDER] Starting GestureLink 2D Builder Mode...")
+        from src.core.app import run_app, AppMode
+        run_app(initial_mode=AppMode.BUILDER)
         
     elif args.command == "tray":
-        print("💎 Starting GestureLink Tray...")
-        run_command(["src/tray_hub.py"])
+        from src.gui.tray import start_tray
+        start_tray()
         
     elif args.command == "install":
-        print("🛠 Opening Installer...")
-        try:
-            # Try GUI first for non-tech users
-            run_command(["src/hub/gui_installer.py"])
-        except Exception:
-            # Fallback to terminal
-            run_command(["installers/hub/install.py"])
-        
-    elif args.command == "builder":
-        print("🧱 Starting GestureLink Builder (2D Isometric Mode)...")
-        run_command(["run.py"])
+        from scripts.install_context_menu import install
+        install()
         
     else:
-        parser.print_help()
+        # Default: Start Productivity Mode locally
+        print("[VISION] Starting Local Gesture Control...")
+        from src.core.app import run_app, AppMode
+        run_app(initial_mode=AppMode.PRODUCTIVITY)
 
 if __name__ == "__main__":
     main()
