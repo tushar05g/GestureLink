@@ -405,7 +405,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     
     @app.get("/hub")
     async def hub_page():
-        content = HUB_HTML.read_text()
+        with open(HUB_HTML, "r", encoding="utf-8") as f:
+            content = f.read()
         info = {
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
@@ -446,12 +447,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         discovery.start()
         lan_ip = detect_lan_ip()
         proto = "https" if CERT_PEM.exists() else "http"
-        print("\n" + "═"*50)
-        print("🚀 GESTURELINK HUB IS LIVE")
-        print(f"  • Local Dashboard:  {proto}://localhost:{port}/hub")
-        print(f"  • Mobile Access:    {proto}://{lan_ip}:{port}")
-        print(f"  • Pairing PIN:      {tokens.current_pin}")
-        print("═"*50 + "\n")
+        print("\n" + "="*50)
+        print("STARTING GESTURELINK HUB...")
+        print(f"  * Local Dashboard:  {proto}://localhost:{port}/hub")
+        print(f"  * Mobile Access:    {proto}://{lan_ip}:{port}")
+        print(f"  * Pairing PIN:      {tokens.current_pin}")
+        print("="*50 + "\n")
         logger.info("Hub Started successfully.")
         # Store in app state or a variable in the closure to prevent GC
         app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
