@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GestureLink | Hub Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #03070c;
+            --surface: rgba(255, 255, 255, 0.03);
+            --surface-hover: rgba(255, 255, 255, 0.06);
+            --accent: #00ff95;
+            --accent-glow: rgba(0, 255, 149, 0.3);
+            --danger: #ff4757;
+            --text-primary: #ffffff;
+            --text-secondary: #94a3b8;
+            --border: rgba(255, 255, 255, 0.08);
+            --sidebar-w: 260px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(0, 255, 149, 0.03) 0%, transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(0, 162, 255, 0.03) 0%, transparent 50%);
+        }
+
+        /* Sidebar */
+        nav.sidebar {
+            width: var(--sidebar-w);
+            height: 100vh;
+            background: rgba(255, 255, 255, 0.02);
+            border-right: 1px solid var(--border);
+            padding: 40px 24px;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            left: 0;
+            top: 0;
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+
+        .logo-wrap {
+            margin-bottom: 48px;
+        }
+
+        .logo-wrap h1 {
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--accent);
+            text-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .nav-links {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 12px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            background: var(--surface);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            box-shadow: inset 0 0 0 1px var(--border);
+            color: var(--accent);
+        }
+
+        /* Main Content */
+        main {
+            margin-left: var(--sidebar-w);
+            flex: 1;
+            padding: 40px 60px;
+            max-width: 1400px;
+        }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+
+        .header-row h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+
+        /* Grid & Cards */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 24px;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 24px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+        }
+
+        .card h3 {
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Buttons */
+        .btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+            outline: none;
+        }
+
+        .btn:hover {
+            background: var(--surface-hover);
+            border-color: var(--text-secondary);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            box-shadow: 0 4px 15px var(--accent-glow);
+        }
+
+        .btn-primary:hover {
+            background: #00e686;
+            transform: scale(1.02);
+        }
+
+        .btn-danger {
+            color: var(--danger);
+            border-color: rgba(255, 71, 87, 0.2);
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 71, 87, 0.1);
+            border-color: var(--danger);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            border-color: transparent;
+            color: var(--text-secondary);
+        }
+
+        .btn-ghost:hover {
+            background: var(--surface);
+            color: var(--text-primary);
+        }
+
+        /* Status Indicators */
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .status-dot.active {
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(1.2); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            background: var(--surface-hover);
+        }
+
+        .badge-success {
+            background: rgba(0, 255, 149, 0.1);
+            color: var(--accent);
+        }
+
+        /* Video Feed */
+        .video-container {
+            position: relative;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        #webrtc-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-secondary);
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+
+        /* Modal */
+        #qr-modal {
+            display:none; 
+            position:fixed; 
+            inset:0; 
+            background:rgba(0,0,0,0.85); 
+            backdrop-filter:blur(10px); 
+            z-index:1000; 
+            align-items:center; 
+            justify-content:center;
+        }
+
+        .section { display: none; animation: fadeIn 0.3s ease-out; }
+        .section.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="logo-wrap">
+            <h1>GestureLink</h1>
+        </div>
+        <div class="nav-links">
+            <a href="#" class="nav-item active" onclick="switchTab('overview', this)">Overview</a>
+            <a href="#" class="nav-item" onclick="switchTab('devices', this)">Connected Devices</a>
+            <a href="#" class="nav-item" onclick="switchTab('logs', this)">System Logs</a>
+            <a href="#" class="nav-item" onclick="switchTab('settings', this)">Settings</a>
+        </div>
+
+        <div style="margin-top: auto; padding: 20px; background: var(--surface); border-radius: 16px; border: 1px solid var(--border);">
+            <div id="pin-display" style="font-size: 1.5rem; font-weight: 800; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 4px;">------</div>
+            <div style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700;">Active Pairing PIN</div>
+        </div>
+    </nav>
+
+    <main>
+        <section id="overview" class="section active">
+            <div class="header-row">
+                <div>
+                    <h2>System Overview</h2>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem;">Hub Status: <span style="color: var(--accent)">● Active Monitoring</span></p>
+                </div>
+                <button onclick="document.getElementById('qr-modal').style.display='flex'" class="btn btn-primary">+ Pair Mobile</button>
+            </div>
+
+            <div class="grid">
+                <section class="card" style="grid-column: span 2;">
+                    <h3><div class="status-dot active"></div> Live Gesture Stream</h3>
+                    <div class="video-container">
+                        <video id="webrtc-video" autoplay playsinline></video>
+                        <div id="video-placeholder" class="video-placeholder">
+                            Waiting for Mobile Stream...
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <h3>Pending Access <span id="pending-count" class="badge">0</span></h3>
+                    <div id="pending-list">
+                        <div class="empty-state">No pending requests</div>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <h3>Discovered Agents</h3>
+                    <div id="agent-list">
+                        <div class="empty-state">Searching network...</div>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <section id="devices" class="section">
+            <div class="header-row"><h2>Connected Devices <span id="connected-count" class="badge">0</span></h2></div>
+            <div class="card">
+                <div id="connected-list">
+                    <div class="empty-state">No devices currently active. Pair a phone to begin.</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="logs" class="section">
+            <div class="header-row"><h2>System Logs</h2></div>
+            <div class="card" style="font-family: monospace; font-size: 0.8rem; background: #000; color: #0f0; max-height: 400px; overflow-y: auto;">
+                <div style="padding: 10px;">[INFO] Hub initialized successfully.</div>
+                <div style="padding: 10px;">[INFO] Security Manager active.</div>
+            </div>
+        </section>
+
+        <section id="settings" class="section">
+            <div class="header-row"><h2>Hub Settings</h2></div>
+            <div class="card">
+                <h3>General</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">Manage Hub-wide security and performance parameters.</p>
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--surface); border-radius: 12px;">
+                    <span>Auto-Rotate PIN</span>
+                    <span style="color: var(--accent);">Enabled (30m)</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="qr-modal">
+        <div class="card" style="width: 340px; text-align:center; padding: 32px; border-color: var(--accent);">
+            <h3 style="margin-bottom: 24px; color: #fff;">Pair New Device</h3>
+            <div style="background: white; padding: 12px; border-radius: 16px; margin-bottom: 24px; display: inline-block; box-shadow: 0 0 30px var(--accent-glow);">
+                <img id="qr-img" src="/lan-qr.png" alt="QR Code" style="width: 220px; height: 220px; display: block;">
+            </div>
+            <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 24px; line-height: 1.5;">Scan this code with your phone to open the controller app immediately.</p>
+            <button onclick="document.getElementById('qr-modal').style.display='none'" class="btn" style="width:100%">Close</button>
+        </div>
+    </div>
+
+    <script>
+        /*INFO_INJECTION*/
+        function switchTab(id, el) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            el.classList.add('active');
+        }
+
+        async function fetchUpdates() {
+            try {
+                const data = window.infoData || {};
+                if (!data.pin) return;
+
+                document.getElementById('pin-display').textContent = data.pin;
+
+                const proto = window.location.protocol;
+                const currentUrl = data.ngrok_url || `${proto}//${data.lan_ip}:${data.port}`;
+                // Issue 4: QR points to base URL only
+                document.getElementById('qr-img').src = `/lan-qr.png?url=${encodeURIComponent(currentUrl)}`;
+
+                // Pending pairing requests
+                const secRes = await fetch('/api/security/pending');
+                const secData = await secRes.json();
+                renderPending(secData.pending);
+                document.getElementById('pending-count').textContent = secData.pending.length;
+
+                // Live connected clients
+                const clientRes = await fetch('/api/connected-clients');
+                const clientData = await clientRes.json();
+                renderConnectedClients(clientData.clients);
+                document.getElementById('connected-count').textContent = clientData.clients.length;
+
+                // Network Agents
+                const agentRes = await fetch('/api/discovered');
+                const agentData = await agentRes.json();
+                renderAgents(agentData.devices);
+            } catch (err) {
+                console.error("Update failed:", err);
+            }
+        }
+
+        function renderConnectedClients(clients) {
+            const list = document.getElementById('connected-list');
+            if (!clients || clients.length === 0) {
+                list.innerHTML = '<div class="empty-state">No devices currently active. Pair a phone to begin.</div>';
+                return;
+            }
+            list.innerHTML = clients.map(c => {
+                const mins = Math.floor((Date.now()/1000 - c.connected_at) / 60);
+                const duration = mins < 1 ? 'Just connected' : `${mins}m connected`;
+                return `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:16px; background:rgba(0,255,149,0.05); border:1px solid rgba(0,255,149,0.15); border-radius:12px; margin-bottom:12px;">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div class="status-dot active"></div>
+                            <span style="font-weight:700;">📱 Mobile Controller</span>
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">${c.ip} &nbsp;·&nbsp; ${duration}</div>
+                    </div>
+                    <span style="font-size:0.75rem; padding:4px 10px; border-radius:20px; background:rgba(0,255,149,0.1); color:var(--accent); border:1px solid rgba(0,255,149,0.2);">ACTIVE</span>
+                </div>`;
+            }).join('');
+        }
+
+        function renderPending(pending) {
+            const list = document.getElementById('pending-list');
+            if (!pending || pending.length === 0) {
+                list.innerHTML = '<div class="empty-state">System Secure. No requests.</div>';
+                return;
+            }
+            list.innerHTML = pending.map(req => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(0,255,149,0.05); border: 1px solid rgba(0,255,149,0.1); border-radius: 12px; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-weight: 700; font-size: 0.9rem;">${req.hostname || 'Mobile Request'}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-secondary);">${req.ip}</div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.75rem;" onclick="approveRequest('${req.id}')">Allow</button>
+                        <button class="btn btn-ghost" style="padding: 6px 12px; font-size: 0.75rem;" onclick="rejectRequest('${req.id}')">Deny</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function approveRequest(id) {
+            const res = await fetch('/api/security/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+            const data = await res.json();
+            if (data.ok) fetchUpdates();
+        }
+
+        async function rejectRequest(id) {
+            await fetch('/api/security/reject', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+            fetchUpdates();
+        }
+
+        function renderAgents(agents) {
+            const list = document.getElementById('agent-list');
+            const ips = Object.keys(agents);
+            if (ips.length === 0) {
+                list.innerHTML = '<div class="empty-state">No other PCs found</div>';
+                return;
+            }
+            list.innerHTML = ips.map(ip => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--surface); border-radius: 12px; margin-bottom: 8px; border: 1px solid var(--border);">
+                    <div>
+                        <div style="font-weight: 600; font-size: 0.9rem;">${agents[ip]}</div>
+                        <div style="font-size: 0.7rem; color: var(--text-secondary);">${ip}</div>
+                    </div>
+                    <button class="btn btn-ghost" style="padding: 6px 12px; font-size: 0.7rem;" onclick="secAction('${ip}', 'trust')">Connect</button>
+                </div>
+            `).join('');
+        }
+
+        async function secAction(ip, action) {
+            await fetch('/api/security/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip, action })
+            });
+            fetchUpdates();
+        }
+
+        // WebRTC & Vision Relay
+        let peerConn = null;
+        let localWS = null;
+        const video = document.getElementById('webrtc-video');
+        const placeholder = document.getElementById('video-placeholder');
+
+        function initLocalWS() {
+            const proto = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            localWS = new WebSocket(`${proto}//${globalThis.location.host}/ws?token=hub_internal`);
+            localWS.onclose = () => setTimeout(initLocalWS, 2000);
+        }
+
+        async function relayFrames() {
+            if (video.paused || video.ended || !localWS || localWS.readyState !== 1) {
+                requestAnimationFrame(relayFrames);
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = 640; canvas.height = 480;
+            canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+            canvas.toBlob(blob => {
+                if (blob) blob.arrayBuffer().then(buf => localWS.send(buf));
+                setTimeout(() => requestAnimationFrame(relayFrames), 33);
+            }, 'image/jpeg', 0.5);
+        }
+
+        async function pollSignals() {
+            while (true) {
+                try {
+                    const res = await fetch('/api/webrtc/signal/hub_pc');
+                    const data = await res.json();
+                    if (data.ok && data.signal) {
+                        const signal = data.signal;
+                        if (signal.type === "offer") {
+                            if (peerConn) peerConn.close();
+                            peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+                            peerConn.ontrack = e => {
+                                video.srcObject = e.streams[0];
+                                placeholder.style.display = 'none';
+                                relayFrames();
+                            };
+                            peerConn.onicecandidate = e => {
+                                if (e.candidate) fetch(`/api/webrtc/signal/${signal.from}`, {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({ type: "candidate", candidate: e.candidate })
+                                });
+                            };
+                            await peerConn.setRemoteDescription(new RTCSessionDescription(signal));
+                            const answer = await peerConn.createAnswer();
+                            await peerConn.setLocalDescription(answer);
+                            fetch(`/api/webrtc/signal/${signal.from}`, {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ type: "answer", sdp: answer.sdp })
+                            });
+                        } else if (signal.type === "candidate" && peerConn) {
+                            await peerConn.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                        }
+                    }
+                } catch (e) {}
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+
+        initLocalWS();
+        pollSignals();
+        fetchUpdates().then(() => {
+            // Issue 3: poll every 1s so pair requests appear within 1 second
+            setInterval(fetchUpdates, 1000);
+        });
+    </script>
+</body>
+</html>
