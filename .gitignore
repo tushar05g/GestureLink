@@ -1,3 +1,5 @@
+# GestureLink Ignores
+node_modules/
 venv/
 __pycache__/
 *.pyc
@@ -6,3 +8,10 @@ src/hub/security.json
 src/hub/settings.json
 src/core/models/
 *.task
+cert.pem
+key.pem
+dist/
+build/
+*.egg-info/
+*.zip
+.installed

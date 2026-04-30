@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>GestureLink Controller</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#03070c">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.2/css/all.min.css">
+  <style>
+    :root {
+      --bg: #03070c;
+      --surface: rgba(255, 255, 255, 0.04);
+      --surface-hover: rgba(255, 255, 255, 0.08);
+      --accent: #00ff95;
+      --accent-glow: rgba(0, 255, 149, 0.3);
+      --text-primary: #ffffff;
+      --text-secondary: #94a3b8;
+      --border: rgba(255, 255, 255, 0.08);
+      --glass: rgba(255, 255, 255, 0.02);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+      background-image: radial-gradient(circle at 50% 50%, rgba(0, 255, 149, 0.03) 0%, transparent 100%);
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* Onboarding Overlay */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      text-align: center;
+      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-20px);
+    }
+
+    .logo-pulse {
+      width: 80px;
+      height: 80px;
+      background: var(--accent);
+      border-radius: 20px;
+      margin-bottom: 32px;
+      box-shadow: 0 0 40px var(--accent-glow);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: #000;
+      font-weight: 800;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 0 20px var(--accent-glow); }
+      50% { transform: scale(1.05); box-shadow: 0 0 50px var(--accent-glow); }
+      100% { transform: scale(1); box-shadow: 0 0 20px var(--accent-glow); }
+    }
+
+    .pin-input-group {
+      display: flex;
+      gap: 8px;
+      margin: 32px 0;
+    }
+
+    .pin-box {
+      width: 45px;
+      height: 60px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--accent);
+      text-align: center;
+      line-height: 60px;
+      outline: none;
+    }
+
+    .pin-box:focus {
+      border-color: var(--accent);
+      background: var(--surface-hover);
+    }
+
+    /* Header */
+    header {
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    header h1 {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: var(--accent);
+    }
+
+    .header-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .disconnect-btn {
+      padding: 5px 12px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #ff4757;
+      background: rgba(255, 71, 87, 0.08);
+      border: 1px solid rgba(255, 71, 87, 0.2);
+      border-radius: 20px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+      display: none;
+    }
+    .disconnect-btn.visible { display: block; }
+    .disconnect-btn:hover { background: rgba(255, 71, 87, 0.18); border-color: #ff4757; }
+
+    .conn-status {
+      padding: 4px 12px;
+      background: var(--surface);
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      border: 1px solid var(--border);
+    }
+
+    .conn-status.online {
+      color: var(--accent);
+      border-color: rgba(0, 255, 149, 0.2);
+    }
+
+    /* Tabs */
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 20px 100px;
+    }
+
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 20px;
+      margin-bottom: 20px;
+      backdrop-filter: blur(10px);
+    }
+
+    .card-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Video & Trackpad */
+    .video-wrap {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #000;
+      border-radius: 16px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .touch-pad {
+      width: 100%;
+      height: 240px;
+      background: var(--glass);
+      border: 1px dashed var(--border);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      position: relative;
+    }
+
+    /* Buttons */
+    .btn {
+      width: 100%;
+      padding: 16px;
+      border-radius: 16px;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 1rem;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+      box-shadow: 0 0 30px var(--accent-glow);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+
+    /* Device card connect button */
+    .device-connect-btn {
+      padding: 7px 14px;
+      border-radius: 10px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      background: transparent;
+      transition: all 0.18s;
+      min-width: 80px;
+    }
+    .device-connect-btn:active { transform: scale(0.94); background: rgba(0,255,149,0.1); }
+    .device-connect-btn.connected {
+      background: rgba(0,255,149,0.12);
+      border-color: var(--accent);
+      color: var(--accent);
+      opacity: 0.5;
+      pointer-events: none;
+    }
+    .device-connect-btn.connecting {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    .device-connect-btn.connecting::after {
+      content: '...';
+      animation: dots 1s infinite;
+    }
+    @keyframes dots {
+      0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; }
+    }
+
+    /* Scan button */
+    .scan-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .scan-ripple {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+    .scan-ripple.active {
+      animation: ripple 0.8s infinite;
+    }
+    @keyframes ripple {
+      0% { transform: scale(1); opacity: 1; }
+      100% { transform: scale(2.5); opacity: 0; }
+    }
+
+    /* Shortcut cards */
+    .shortcut-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .shortcut-row:last-child { border-bottom: none; }
+    .shortcut-label { font-size: 0.82rem; color: var(--text-secondary); }
+    .shortcut-key {
+      font-size: 0.72rem;
+      font-family: monospace;
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      padding: 3px 8px;
+      border-radius: 6px;
+      color: var(--accent);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .shortcut-key:hover { background: rgba(0,255,149,0.1); border-color: var(--accent); }
+
+    /* Bottom Nav */
+    nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 80px;
+      background: rgba(3, 7, 12, 0.8);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.7rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .nav-item.active {
+      color: var(--accent);
+    }
+
+    .nav-item i {
+      font-size: 1.25rem;
+      margin-bottom: 2px;
+    }
+
+    /* Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+
+    .switch input { opacity: 0; width: 0; height: 0; }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--surface);
+      transition: .4s;
+      border-radius: 34px;
+      border: 1px solid var(--border);
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px; width: 18px;
+      left: 2px; bottom: 2px;
+      background: var(--text-secondary);
+      transition: .4s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider { background: var(--accent-glow); border-color: var(--accent); }
+    input:checked + .slider:before { transform: translateX(20px); background: var(--accent); }
+
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- ONBOARDING OVERLAY -->
+    <!-- App Selection Modal -->
+  <div id="appModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <h3 style="margin-bottom: 24px; font-weight: 800;">Configure Gesture</h3>
+      
+      <div style="margin-bottom: 24px;">
+        <label style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; color: var(--accent-primary); margin-bottom: 12px; display: block; text-transform: uppercase;">Discovered Applications</label>
+        <select id="appSelect" style="width: 100%; padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s;">
+          <option value="">-- Choose from device --</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 30px;">
+        <label style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 12px; display: block; text-transform: uppercase;">Or Custom Command / URL</label>
+        <input type="text" id="customTarget" placeholder="e.g. spotify, chrome, https://..." style="width: 100%; padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s;">
+      </div>
+
+      <div style="display: flex; gap: 12px;">
+        <button id="closeAppModal" class="btn btn-ghost" style="flex: 1;">Cancel</button>
+        <button id="saveAppShortcut" class="btn btn-primary" style="flex: 1;">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pairingOverlay" class="overlay">
+      <div class="logo-pulse">G</div>
+      <h2 style="font-size: 1.5rem; font-weight: 800; margin-bottom: 8px;">Connect to Hub</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">Enter the 6-digit PIN from your PC</p>
+      
+      <div class="pin-input-group">
+        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
+      </div>
+
+      <div id="pairStatusText" style="margin-top: 15px; font-size: 0.85rem; color: var(--accent); font-weight: 600; min-height: 1.2em;"></div>
+      <p id="pairError" style="color: var(--danger); font-size: 0.8rem; margin-top: 8px; opacity: 0; transition: opacity 0.3s;">⚠️ Invalid PIN or Request Denied</p>
+      <button id="pairBtn" class="btn btn-primary" style="margin-top: 20px;">Pair with Device</button>
+    </div>
+
+    <!-- HEADER -->
+    <header>
+      <h1>GestureLink</h1>
+      <div class="header-right">
+        <button id="disconnectBtn" class="disconnect-btn" onclick="handleDisconnect()">⏏ Disconnect</button>
+        <div id="connBadge" class="conn-status">WAITING...</div>
+      </div>
+    </header>
+
+    <!-- MAIN -->
+    <main>
+      <!-- CONTROL TAB -->
+      <section id="controlTab" class="tab-content active">
+        <div class="card">
+          <div class="card-title">
+            <span>Remote PC Intelligence</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span id="remoteGestureStatus" style="color: var(--accent); font-family: monospace; font-size: 0.75rem;">CAMERA OFF</span>
+              <label class="switch">
+                <input type="checkbox" id="pcCameraToggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: rgba(0,255,149,0.05); border-radius: 12px; border: 1px solid rgba(0,255,149,0.1);">
+            <div style="font-size: 1.5rem; color: var(--accent);"><i class="fas fa-video"></i></div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary);">
+              Toggle the <b>PC's built-in camera</b> to enable gesture recognition on the target machine.
+            </div>
+          </div>
+        </div>
+
+
+        <div class="card">
+          <div class="card-title">Precision Trackpad</div>
+          <div id="touchZone" class="touch-pad">
+            <div style="text-align: center;">
+              <i class="fas fa-hand-pointer" style="font-size: 1.5rem; opacity: 0.2; margin-bottom: 12px; display: block;"></i>
+              <span style="opacity: 0.5; font-size: 0.8rem;">Slide to move • Tap to click</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DEVICES TAB -->
+      <section id="devicesTab" class="tab-content">
+        <div class="card-title" style="padding-left: 10px;">Network Connectivity</div>
+        <div id="activeDeviceCard" class="card">
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="width: 48px; height: 48px; background: var(--surface); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem;">💻</div>
+            <div>
+              <div id="activeDeviceName" style="font-weight: 700;">Local Hub PC</div>
+              <div id="activeDeviceIP" style="color: var(--text-secondary); font-size: 0.75rem;">Searching...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Nearby PCs
+            <button id="scanBtn" class="btn btn-ghost" style="padding: 6px 14px; font-size: 0.75rem; width: auto; display: flex; align-items: center; gap: 6px;">
+              <span class="scan-ripple" id="scanRipple"></span> Scan Network
+            </button>
+          </div>
+          <div id="deviceList" style="display: flex; flex-direction: column; gap: 8px;">
+            <div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">Tap Scan to discover PCs</div>
+          </div>
+          <button id="addManualBtn" class="btn btn-ghost" style="margin-top: 12px; padding: 12px; font-size: 0.85rem;">+ Add Manual IP</button>
+        </div>
+      </section>
+
+      <!-- SETTINGS TAB -->
+      <section id="settingsTab" class="tab-content">
+        <div class="card-title" style="padding-left: 10px;">Configuration</div>
+        <div class="card">
+          <div style="margin-bottom: 24px;">
+            <label style="display: block; font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase;">Cursor Sensitivity</label>
+            <input type="range" id="sensRange" min="5" max="95" value="50" style="width: 100%; accent-color: var(--accent);">
+          </div>
+          
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <label style="font-size: 0.85rem; font-weight: 600;">Haptic Feedback</label>
+            <label class="switch">
+              <input type="checkbox" id="hapticToggle" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <button id="saveBtn" class="btn btn-primary">Apply Settings</button>
+        </div>
+
+
+        <div class="card" style="margin-top: 16px;">
+          <div class="card-title">Keyboard Shortcuts</div>
+          <div id="shortcutList">
+            <div class="shortcut-row" onclick="globalThis.editShortcut('three_fingers')">
+              <span class="shortcut-label">🤟 Three Fingers → Mission Control</span>
+              <span class="shortcut-key" data-shortcut="three_fingers">super+d</span>
+            </div>
+            <div class="shortcut-row" onclick="globalThis.editShortcut('four_fingers')">
+              <span class="shortcut-label">🤙 Four Fingers → Fullscreen</span>
+              <span class="shortcut-key" data-shortcut="four_fingers">f11</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+          <div class="card-title">Danger Zone</div>
+          <p style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 16px;">Disconnect from the current Hub and reset all pairing data.</p>
+          <button id="logoutBtn" class="btn btn-danger">Reset Session</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- NAVIGATION -->
+    <nav>
+      <a href="#" class="nav-item active" data-tab="control">
+        <i class="fas fa-gamepad"></i>
+        <span>Control</span>
+      </a>
+      <a href="#" class="nav-item" data-tab="devices">
+        <i class="fas fa-desktop"></i>
+        <span>Devices</span>
+      </a>
+      <a href="#" class="nav-item" data-tab="settings">
+        <i class="fas fa-cog"></i>
+        <span>Settings</span>
+      </a>
+    </nav>
+  </div>
+
+  <script>
+    // PIN Auto-focus logic
+    const inputs = document.querySelectorAll('.pin-box');
+    inputs.forEach((input, index) => {
+      input.addEventListener('input', (e) => {
+        const v = e.target.value;
+        // Clamp to single digit
+        if (v.length > 1) e.target.value = v[v.length - 1];
+        if (e.target.value && index < inputs.length - 1) inputs[index + 1].focus();
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !e.target.value && index > 0) inputs[index - 1].focus();
+      });
+    });
+
+    // Bug 2: Disconnect — clear token and show pairing screen
+    function handleDisconnect() {
+      if (!confirm('Disconnect and enter a new PIN?')) return;
+      localStorage.removeItem('gesturelink_token');
+      location.reload();
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+    }
+  </script>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
