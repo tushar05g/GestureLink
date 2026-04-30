@@ -36,6 +36,8 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from src.core.utils import resource_path
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -45,18 +47,21 @@ _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 )
-_MODEL_DIR  = os.path.join(os.path.dirname(__file__), "models")
-_MODEL_PATH = os.path.join(_MODEL_DIR, "hand_landmarker.task")
+
+# Use resource_path so the model is found correctly inside a PyInstaller bundle
+_MODEL_PATH = resource_path("src/core/models/hand_landmarker.task")
+_MODEL_DIR  = _MODEL_PATH.parent
+
 
 
 def _ensure_model() -> str:
-    if os.path.exists(_MODEL_PATH):
-        return _MODEL_PATH
-    os.makedirs(_MODEL_DIR, exist_ok=True)
+    if _MODEL_PATH.exists():
+        return str(_MODEL_PATH)
+    _MODEL_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("Downloading hand landmarker model (~26MB) — one-time setup...")
-    urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
+    urllib.request.urlretrieve(_MODEL_URL, str(_MODEL_PATH))
     logger.info("Model saved to %s", _MODEL_PATH)
-    return _MODEL_PATH
+    return str(_MODEL_PATH)
 
 
 # ---------------------------------------------------------------------------

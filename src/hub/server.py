@@ -25,6 +25,7 @@ from src.core.shortcuts import ShortcutManager
 from src.core.vision import VisionProcessor
 from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
 from src.core.vision_worker import AsyncVisionWorker
+from src.core.utils import resource_path
 
 # Checklist:
 # | 1 | Hub starts without any error. | ✅ Passed | No startup errors. |
@@ -45,12 +46,15 @@ hub_camera_active: bool = False
 
 APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
-CLIENT_HTML = HUB_DIR.parent / "web" / "client" / "remote_client.html"
-HUB_HTML = HUB_DIR.parent / "web" / "hub" / "hub.html"
-MOBILE_DIST = HUB_DIR.parent / "web" / "mobile" / "dist"
+
+# Use resource_path() so these resolve correctly inside a PyInstaller .exe
+CLIENT_HTML  = resource_path("src/web/client/remote_client.html")
+HUB_HTML     = resource_path("src/web/hub/hub.html")
+MOBILE_DIST  = resource_path("src/web/mobile/dist")
 SETTINGS_FILE = HUB_DIR / "settings.json"
 SECURITY_FILE = HUB_DIR / "security.json"
-CERT_PEM = Path(__file__).resolve().parent.parent.parent / "cert.pem"
+CERT_PEM = resource_path("cert.pem")
+KEY_PEM  = resource_path("key.pem")
 
 def _save_settings(sensitivity: int, scroll_speed: int) -> None:
     try:
@@ -639,8 +643,8 @@ def run():
     args = parser.parse_args()
     
     project_root = Path(__file__).resolve().parent.parent.parent
-    cert = project_root / "cert.pem"
-    key  = project_root / "key.pem"
+    cert = resource_path("cert.pem")
+    key  = resource_path("key.pem")
     ssl = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)} if cert.exists() else {}
     
     app = build_app(args.host, args.port)

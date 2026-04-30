@@ -1,5 +1,31 @@
 import math
+import os
+import sys
 import time
+from pathlib import Path
+
+
+def resource_path(relative_path: str) -> Path:
+    """
+    Get the absolute path to a resource.
+    Works for both normal Python execution and PyInstaller frozen executables.
+
+    PyInstaller extracts bundled files to a temporary folder at runtime
+    stored in sys._MEIPASS. This function resolves relative paths against
+    that folder when frozen, or against the project root otherwise.
+
+    Usage:
+        html_file = resource_path("src/web/hub/hub.html")
+        model     = resource_path("src/core/models/hand_landmarker.task")
+    """
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running inside a PyInstaller bundle
+        base = Path(sys._MEIPASS)
+    else:
+        # Running normally — resolve from project root (two levels above utils.py)
+        base = Path(__file__).resolve().parent.parent.parent
+    return base / relative_path
+
 
 class OneEuroFilter:
     """

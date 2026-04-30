@@ -13,6 +13,7 @@ __pycache__/
 # Distribution / packaging
 build/
 dist/
+release/
 *.egg-info/
 pip-wheel-metadata/
 
@@ -22,9 +23,9 @@ venv/
 env/
 ENV/
 
-# PyInstaller
-*.manifest
-*.spec
+# PyInstaller config (Include these for reproducible builds)
+!*.manifest
+!*.spec
 
 # Installer logs
 pip-log.txt
