@@ -316,7 +316,8 @@
                 <section class="card" style="grid-column: span 2;">
                     <h3><div class="status-dot active"></div> Live Gesture Stream</h3>
                     <div class="video-container">
-                        <video id="webrtc-video" autoplay playsinline></video>
+                        <video id="webrtc-video" autoplay playsinline style="display:none;"></video>
+                        <img id="hub-stream-img" style="width:100%; height:100%; object-fit:cover; display:none;" src="">
                         <div id="video-placeholder" class="video-placeholder">
                             Waiting for Camera or Remote Stream...
                         </div>
@@ -433,6 +434,33 @@
                 const clientData = await clientRes.json();
                 renderConnectedClients(clientData.clients);
                 document.getElementById('connected-count').textContent = clientData.clients.length;
+
+                // Hub Camera Status & Stream
+                const hubCamRes = await fetch('/api/hub/camera/status');
+                const hubCamData = await hubCamRes.json();
+                const hubImg = document.getElementById('hub-stream-img');
+                const webVideo = document.getElementById('webrtc-video');
+                const placeholder = document.getElementById('video-placeholder');
+
+                if (hubCamData.active) {
+                    if (hubImg.src === "" || hubImg.style.display === "none") {
+                        hubImg.src = "/api/hub/camera/stream";
+                        hubImg.style.display = "block";
+                        webVideo.style.display = "none";
+                        placeholder.style.display = "none";
+                    }
+                } else {
+                    hubImg.style.display = "none";
+                    hubImg.src = "";
+                    // Only show video/placeholder if not local cam
+                    if (!webVideo.srcObject) {
+                        placeholder.style.display = "flex";
+                        webVideo.style.display = "none";
+                    } else {
+                        webVideo.style.display = "block";
+                        placeholder.style.display = "none";
+                    }
+                }
 
                 // Network Agents
                 const agentRes = await fetch('/api/discovered');

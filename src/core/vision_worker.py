@@ -18,19 +18,22 @@ def vision_worker_process(input_queue, output_queue, config):
     try:
         while True:
             item = input_queue.get()
-            if item is None: # Shutdown signal
-                break
+            if item is None: break
             
-            frame_bytes, builder_mode = item
-            frame = vision.decode_frame(frame_bytes)
+            frame_input, builder_mode = item
+            if isinstance(frame_input, bytes):
+                frame = vision.decode_frame(frame_input)
+            else:
+                frame = frame_input
             
             if frame is not None:
-                # We can't await here because this is a synchronous Process.
-                # vision.process_frame is async, so we need to run it in a loop
-                loop = asyncio.new_event_loop()
-                state = loop.run_until_complete(vision.process_frame(frame, builder_mode))
-                output_queue.put(state)
-                loop.close()
+                state = vision.process_frame_sync(frame, builder_mode)
+                
+                # Draw visual feedback for the dashboard
+                annotated_frame = vision.draw_landmarks(frame, state)
+                _, jpeg = cv2.imencode('.jpg', annotated_frame)
+                
+                output_queue.put((state, jpeg.tobytes()))
     except Exception as e:
         logger.error(f"Vision Worker Error: {e}")
     finally:
@@ -62,16 +65,13 @@ class AsyncVisionWorker:
             self.process.terminate()
 
     async def process_frame(self, frame_bytes, builder_mode=False):
-        # Non-blocking put
         try:
-            if self.input_queue.full():
-                self.input_queue.get_nowait() # Drop oldest frame
+            if self.input_queue.full(): self.input_queue.get_nowait()
             self.input_queue.put_nowait((frame_bytes, builder_mode))
         except: pass
         
-        # Get latest result if available
-        results = []
+        latest_res = None
         while not self.output_queue.empty():
-            results.append(self.output_queue.get_nowait())
+            latest_res = self.output_queue.get_nowait()
         
-        return results[-1] if results else None
+        return latest_res # Returns (state, annotated_bytes)

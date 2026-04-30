@@ -315,9 +315,9 @@ class VisionProcessor:
             base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
             running_mode=mp.tasks.vision.RunningMode.IMAGE,
             num_hands=2,
-            min_hand_detection_confidence=0.6,
-            min_hand_presence_confidence=0.6,
-            min_tracking_confidence=0.5,
+            min_hand_detection_confidence=0.3,
+            min_hand_presence_confidence=0.3,
+            min_tracking_confidence=0.3,
         )
         self._landmarker   = mp.tasks.vision.HandLandmarker.create_from_options(options)
         self._mp_image_cls = mp.Image
@@ -339,11 +339,27 @@ class VisionProcessor:
             logger.error("Failed to decode frame: %s", e)
             return None
 
-    async def process_frame(
-        self,
-        frame_bgr: np.ndarray,
-        builder_mode: bool = False,
-    ) -> GestureState:
+    async def process_frame(self, frame_input, builder_mode=False) -> GestureState:
+        """Async version for the main server loop. Handles bytes or numpy."""
+        if isinstance(frame_input, bytes):
+            frame = self.decode_frame(frame_input)
+        else:
+            frame = frame_input
+            
+        if frame is None: return GestureState()
+        return await self._process(frame, builder_mode)
+
+    def process_frame_sync(self, frame_input, builder_mode=False) -> GestureState:
+        """Sync version for the vision worker process. Handles bytes or numpy."""
+        if isinstance(frame_input, bytes):
+            frame = self.decode_frame(frame_input)
+        else:
+            frame = frame_input
+            
+        if frame is None: return GestureState()
+        return asyncio.run(self._process(frame, builder_mode))
+
+    async def _process(self, frame_bgr: np.ndarray, builder_mode: bool = False) -> GestureState:
         import cv2
         self.last_landmarks = None
         state = GestureState()
@@ -471,6 +487,31 @@ class VisionProcessor:
         hands      = [_Hand(h["landmarks"]) for h in raw["hands"]]
         handedness = [[_Handedness(h["handedness"])] for h in raw["hands"]]
         return hands, handedness
+
+    def draw_landmarks(self, frame: np.ndarray, state: GestureState) -> np.ndarray:
+        """Draw hand landmarks and gesture status onto the frame."""
+        import mediapipe as mp
+        annotated = frame.copy()
+        
+        if state.landmarks:
+            # Draw skeletons for each hand
+            for hand_lms in state.landmarks:
+                # MediaPipe Landmark objects don't have a format suitable for drawing_utils directly
+                # so we just draw the dots manually for simplicity/speed
+                h, w, _ = annotated.shape
+                for lm in hand_lms.values():
+                    cx, cy = int(lm['x'] * w), int(lm['y'] * h)
+                    cv2.circle(annotated, (cx, cy), 3, (0, 255, 149), -1)
+
+        # Draw Gesture Status
+        if state.gesture and state.gesture != Gesture.IDLE:
+            cv2.putText(annotated, f"GESTURE: {state.gesture.name}", (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 149), 2)
+        else:
+            cv2.putText(annotated, "WAITING FOR HAND...", (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (150, 150, 150), 2)
+                        
+        return annotated
 
     def close(self) -> None:
         if self._landmarker:

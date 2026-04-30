@@ -39,6 +39,10 @@ from src.core.vision_worker import AsyncVisionWorker
 load_dotenv()
 logger = logging.getLogger("gesture_control.remote")
 
+# Global state for camera streaming
+hub_video_frame: bytes | None = None
+hub_camera_active: bool = False
+
 APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
 CLIENT_HTML = HUB_DIR.parent / "web" / "client" / "remote_client.html"
@@ -85,15 +89,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     security = SecurityManager(SECURITY_FILE)
     tokens = TokenManager()
     discovery = DeviceDiscovery(port=port)
-    discovery = DeviceDiscovery(port=port)
-    vision = AsyncVisionWorker(CONFIG) # Use multiprocessing worker
-    vision.start()
-    shortcuts = ShortcutManager()
+    vision_worker = AsyncVisionWorker(CONFIG) # For remote mobile streams
+    vision_worker.start()
+    
+    # Unified local processor for Hub's camera
+    vision_processor = VisionProcessor(CONFIG)
+    
     shortcuts = ShortcutManager()
     mouse = MouseController(CONFIG, shortcuts=shortcuts, responsive=True)
     
     # Store in app state for access from other endpoints
-    app.state.vision = vision
+    app.state.vision = vision_worker
+    app.state.vision_processor = vision_processor
     app.state.mouse = mouse
     app.state.camera_active = False
     app.state.camera_task = None
@@ -156,59 +163,117 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         return JSONResponse({"devices": discovery.discovered_devices})
 
     async def _hub_camera_loop():
+        global hub_video_frame, hub_camera_active
         import cv2
-        logger.info("Hub camera loop: Attempting to open camera...")
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            logger.error("Hub camera loop: Could not open camera.")
+        
+        indices = [0, 1, 2] # Try multiple common camera IDs
+        cap = None
+        
+        for idx in indices:
+            logger.info(f"Hub camera loop: Trying index {idx}...")
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                # Test a read
+                ret, _ = cap.read()
+                if ret:
+                    logger.info(f"Hub camera loop: Successfully opened camera at index {idx}")
+                    break
+                else:
+                    logger.warning(f"Hub camera loop: Index {idx} opened but failed to read frame.")
+            cap.release()
+            cap = None
+            
+        if cap is None:
+            logger.error("Hub camera loop: Could not find a working camera after trying indices 0, 1, 2.")
             app.state.camera_active = False
+            hub_camera_active = False
             return
 
+        hub_camera_active = True
+        consecutive_failures = 0
         try:
             while app.state.camera_active:
                 ret, frame = cap.read()
                 if not ret:
-                    await asyncio.sleep(0.01)
+                    consecutive_failures += 1
+                    if consecutive_failures > 30: # 1 second of failure
+                         logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
+                         break
+                    await asyncio.sleep(0.03)
                     continue
                 
-                _, frame_jpeg = cv2.imencode('.jpg', frame)
-                state = await app.state.vision.process_frame(frame_jpeg.tobytes())
-                if state:
-                    app.state.mouse.update(state)
+                consecutive_failures = 0
+                # AI Inference - Use local vision directly to avoid multiprocessing issues on Windows
+                try:
+                    # Draw 'Waiting' text by default on the raw frame
+                    annotated_frame = app.state.vision_processor.draw_landmarks(frame, GestureState())
+                    
+                    # Process frame (this is now sync-capable)
+                    state = app.state.vision_processor.process_frame_sync(frame)
+                    if state and state.gesture != Gesture.IDLE:
+                        app.state.mouse.update(state)
+                        annotated_frame = app.state.vision_processor.draw_landmarks(frame, state)
+                    
+                    _, jpeg = cv2.imencode('.jpg', annotated_frame)
+                    hub_video_frame = jpeg.tobytes()
+                except Exception as e:
+                    logger.error(f"Inference error in loop: {e}")
+                    _, frame_jpeg = cv2.imencode('.jpg', frame)
+                    hub_video_frame = frame_jpeg.tobytes()
                 
                 await asyncio.sleep(0.01)
         except Exception as e:
-            logger.error(f"Hub camera loop error: {e}")
+            logger.error(f"Hub camera loop crashed: {e}")
         finally:
-            cap.release()
+            if cap: cap.release()
             app.state.camera_active = False
-            logger.info("Hub camera loop: Released.")
+            hub_camera_active = False
+            hub_video_frame = None
+            logger.info("Hub camera loop: Terminated.")
 
     @app.post("/api/hub/camera/toggle")
     async def toggle_hub_camera(payload: Annotated[dict, Body(...)], target: Optional[str] = Query(None)) -> JSONResponse:
-        # If target is provided and not local, proxy to agent
-        if target and target not in ("localhost", "127.0.0.1", detect_lan_ip()):
-            try:
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(f"http://{target}:8001/api/camera/toggle", json=payload, timeout=2.0)
-                    return JSONResponse(resp.json())
-            except Exception as e:
-                logger.error("Proxy camera toggle failed for %s: %s", target, e)
-                return JSONResponse({"ok": False, "error": str(e)})
-
         active = payload.get("active", False)
-        if active and not app.state.camera_active:
-            app.state.camera_active = True
-            app.state.camera_task = asyncio.create_task(_hub_camera_loop())
-            logger.info("Hub local camera turned ON")
-        elif not active and app.state.camera_active:
-            app.state.camera_active = False
-            # Wait for task to finish or just let it die
-            app.state.camera_task = None
-            logger.info("Hub local camera turned OFF")
+        lan_ip = detect_lan_ip()
+        logger.info(f"Toggle request: target={target}, lan_ip={lan_ip}, active={active}")
+
+        # If target matches hub or is omitted, control local camera
+        is_hub = not target or target in ("localhost", "127.0.0.1", lan_ip)
         
-        return JSONResponse({"ok": True, "active": app.state.camera_active})
+        if is_hub:
+            if active and not app.state.camera_active:
+                app.state.camera_active = True
+                app.state.camera_task = asyncio.create_task(_hub_camera_loop())
+                logger.info("Hub local camera turned ON")
+            elif not active:
+                app.state.camera_active = False
+                logger.info("Hub local camera turned OFF")
+            return JSONResponse({"ok": True, "active": app.state.camera_active})
+        
+        # Otherwise proxy to agent
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(f"http://{target}:8001/api/camera/toggle", json=payload, timeout=2.0)
+                return JSONResponse(resp.json())
+        except Exception as e:
+            logger.error("Proxy camera toggle failed for %s: %s", target, e)
+            return JSONResponse({"ok": False, "error": str(e)})
+
+    @app.get("/api/hub/camera/stream")
+    async def hub_camera_stream():
+        async def frame_generator():
+            global hub_video_frame
+            while hub_camera_active:
+                if hub_video_frame:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + hub_video_frame + b'\r\n')
+                await asyncio.sleep(0.04) # ~25fps
+        return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+    @app.get("/api/hub/camera/status")
+    async def get_hub_camera_status():
+        return JSONResponse({"active": hub_camera_active})
 
     @app.get("/api/apps")
     async def get_apps(ip: Optional[str] = None) -> JSONResponse:
@@ -429,12 +494,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     async def _handle_vision_frame(ws, frame_bytes, vision, mouse):
         # AsyncVisionWorker handles the queue and process management
-        state = await vision.process_frame(frame_bytes)
-        if state:
-            status = mouse.update(state)
-            try:
-                await ws.send_json({"status": status, "type": "gesture"})
-            except: pass
+        result = await vision.process_frame(frame_bytes)
+        if result:
+            state, _ = result
+            if state:
+                status = mouse.update(state)
+                try:
+                    await ws.send_json({"status": status, "type": "gesture"})
+                except: pass
 
     async def _handle_ws_message(ws, msg, vision, mouse):
         try:
