@@ -322,7 +322,9 @@ async function syncSettings() {
       fetch(`${location.origin}/api/settings`).then(r => r.json())
     ]);
     const sens = document.getElementById("sensRange") as HTMLInputElement;
+    const scroll = document.getElementById("scrollRange") as HTMLInputElement;
     if (sens) sens.value = setRes.sensitivity || 50;
+    if (scroll) scroll.value = setRes.scroll_speed || 12;
     renderShortcuts(shortcutsRes.shortcuts || {});
   } catch (_) { }
 }
@@ -394,9 +396,13 @@ async function saveSettings() {
   if (!activePC) return;
   try {
     const sens = (document.getElementById("sensRange") as HTMLInputElement).value;
+    const scroll = (document.getElementById("scrollRange") as HTMLInputElement).value;
     await fetch(`${location.origin}/api/settings`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sensitivity: Number.parseInt(sens) })
+      body: JSON.stringify({ 
+        sensitivity: Number.parseInt(sens),
+        scroll_speed: Number.parseInt(scroll)
+      })
     });
     triggerHaptic(ImpactStyle.Medium);
     alert("Settings applied!");

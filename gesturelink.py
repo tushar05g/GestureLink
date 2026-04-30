@@ -41,19 +41,19 @@ def main():
     args = parser.parse_args()
 
     if args.command == "hub":
-        print("🚀 Starting GestureLink Hub...")
+        print("[HUB] Starting GestureLink Hub...")
         run_command(["-m", "src.hub.server"])
     
     elif args.command == "agent":
-        print("🛰 Starting GestureLink Agent...")
+        print("[AGENT] Starting GestureLink Agent...")
         run_command(["-m", "src.agent.main"])
         
     elif args.command == "tray":
-        print("💎 Starting GestureLink Tray...")
+        print("[TRAY] Starting GestureLink Tray...")
         run_command(["src/tray_hub.py"])
         
     elif args.command == "install":
-        print("🛠 Opening Installer...")
+        print("[INSTALL] Opening Installer...")
         try:
             # Try GUI first for non-tech users
             run_command(["src/hub/gui_installer.py"])
@@ -62,7 +62,7 @@ def main():
             run_command(["installers/hub/install.py"])
         
     elif args.command == "builder":
-        print("🧱 Builder Mode is currently in Research Phase. See builder_mode_research.md")
+        print("[BUILDER] Builder Mode is currently in Research Phase. See builder_mode_research.md")
         
     else:
         parser.print_help()

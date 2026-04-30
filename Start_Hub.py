@@ -9,12 +9,12 @@ def run():
     
     # 1. Check if installed
     if not env_path.exists():
-        print("🚀 First time setup... Opening GestureLink Installer.")
+        print("[SETUP] First time setup... Opening GestureLink Installer.")
         # Run installer first
         subprocess.run([sys.executable, "src/hub/gui_installer.py"])
         
     # 2. Launch Hub
-    print("🛰 Starting GestureLink Hub Dashboard...")
+    print("[HUB] Starting GestureLink Hub Dashboard...")
     python_bin = env_path / "bin" / "python" if os.name != "nt" else env_path / "Scripts" / "python.exe"
     
     # Use Popen to launch and exit the launcher

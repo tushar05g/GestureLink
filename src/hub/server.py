@@ -479,15 +479,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "type": "mobile"
         }
         logger.info("Client connected: %s", client_ip)
-        async def vision_worker():
+        async def ws_receive_loop():
             try:
                 while True:
                     msg = await ws.receive()
                     if "bytes" in msg:
                         # Process vision in a background task so it doesn't block the loop
-                        asyncio.create_task(_handle_vision_frame(ws, msg["bytes"], vision, mouse))
+                        asyncio.create_task(_handle_vision_frame(ws, msg["bytes"], vision_worker, mouse))
                     elif "text" in msg:
-                        await _handle_ws_message(ws, msg, vision, mouse)
+                        await _handle_ws_message(ws, msg, vision_worker, mouse)
             except WebSocketDisconnect:
                 pass
             except Exception as e:
@@ -495,7 +495,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     logger.error("WS Loop Error: %s", e)
 
         try:
-            await vision_worker()
+            await ws_receive_loop()
         finally:
             connected_clients.pop(client_ip, None)
             logger.info("Client disconnected: %s", client_ip)
@@ -551,6 +551,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         async def icon192(): return FileResponse(MOBILE_DIST / "icon-192.png")
         @app.get("/icon-512.png")
         async def icon512(): return FileResponse(MOBILE_DIST / "icon-512.png")
+    
+    @app.get("/remote.html")
+    async def remote_page():
+        return FileResponse(CLIENT_HTML)
+
+    @app.get("/mobile.html")
+    async def mobile_page_alias():
+        if (MOBILE_DIST / "index.html").exists():
+            return FileResponse(MOBILE_DIST / "index.html")
+        return FileResponse(CLIENT_HTML) # Fallback
     
     @app.get("/hub")
     async def hub_page():
@@ -609,7 +619,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.on_event("shutdown")
     def shutdown():
         discovery.stop()
-        vision.stop()
+        vision_worker.stop()
         logger.info("Hub shutting down...")
 
     return app

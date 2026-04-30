@@ -294,7 +294,7 @@ class MouseController:
     def handle_touch_scroll(self, dy: float) -> str:
         """Handle vertical scroll from phone."""
         # Multiplier to make it feel natural
-        scroll_amount = int(dy * 1.5)
+        scroll_amount = int(dy * -1.5)
         if abs(scroll_amount) >= 1:
             pyautogui.scroll(scroll_amount, _pause=False)
             return "TOUCH SCROLL"
