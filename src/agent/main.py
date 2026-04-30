@@ -7,12 +7,24 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 import uvicorn
 from zeroconf import IPVersion, ServiceInfo, Zeroconf
 import argparse
+import multiprocessing
+import platform
+from src.core.vision_worker import AsyncVisionWorker
+import cv2
+import numpy as np
+from src.core.config import CONFIG
+from src.core.vision import VisionProcessor
+from src.core.controller import MouseController
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="GestureLink Micro-Agent")
 pyautogui.FAILSAFE = False
 
 SECRET_TOKEN = ""
+camera_active = False
+camera_task = None
+vision = None
+mouse = None
 
 def _detect_lan_ip():
     try:
@@ -31,6 +43,47 @@ async def get_apps():
     from src.core.shortcuts import ShortcutManager
     sm = ShortcutManager()
     return {"apps": sm.get_available_apps()}
+
+async def _camera_loop():
+    global camera_active, vision, mouse
+    cap = cv2.VideoCapture(0)
+    while camera_active:
+        ret, frame = cap.read()
+        if not ret:
+            await asyncio.sleep(0.01)
+            continue
+        
+        # Process frame
+        state = await vision.process_frame(frame)
+        mouse.update(state)
+        
+        # Small sleep to yield to event loop
+        await asyncio.sleep(0.01)
+    
+    cap.release()
+
+@app.post("/api/camera/toggle")
+async def toggle_camera(payload: dict):
+    global camera_active, camera_task, vision, mouse
+    active = payload.get("active", False)
+    
+    if active and not camera_active:
+        camera_active = True
+        if not vision:
+            vision = AsyncVisionWorker(CONFIG)
+            vision.start()
+        if not mouse:
+            mouse = MouseController(CONFIG)
+        camera_task = asyncio.create_task(_camera_loop())
+        logging.info("Agent camera turned ON")
+    elif not active and camera_active:
+        camera_active = False
+        if camera_task:
+            await camera_task
+            camera_task = None
+        logging.info("Agent camera turned OFF")
+    
+    return {"ok": True, "active": camera_active}
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket, token: str = Query(None)):

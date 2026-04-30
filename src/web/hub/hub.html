@@ -318,7 +318,7 @@
                     <div class="video-container">
                         <video id="webrtc-video" autoplay playsinline></video>
                         <div id="video-placeholder" class="video-placeholder">
-                            Waiting for Mobile Stream...
+                            Waiting for Camera or Remote Stream...
                         </div>
                     </div>
                 </section>
@@ -369,6 +369,17 @@
         </section>
     </main>
 
+    <div id="alert-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+        <div class="card" style="width: 400px; border: 2px solid var(--accent); background: var(--bg); padding: 32px; text-align: center;">
+            <h3 style="color: var(--accent); margin-bottom: 16px;"><i class="fas fa-shield-alt"></i> Access Request</h3>
+            <p id="alert-text" style="margin-bottom: 24px; color: var(--text-primary);">A new device is requesting access to control this Hub.</p>
+            <div id="alert-actions" style="display: flex; gap: 12px;">
+                <button id="alert-approve" class="btn btn-primary" style="flex:1">Approve</button>
+                <button id="alert-deny" class="btn btn-danger" style="flex:1">Deny</button>
+            </div>
+        </div>
+    </div>
+
     <div id="qr-modal">
         <div class="card" style="width: 340px; text-align:center; padding: 32px; border-color: var(--accent);">
             <h3 style="margin-bottom: 24px; color: #fff;">Pair New Device</h3>
@@ -406,6 +417,16 @@
                 const secData = await secRes.json();
                 renderPending(secData.pending);
                 document.getElementById('pending-count').textContent = secData.pending.length;
+
+                // Show alert if new request
+                const alertOverlay = document.getElementById('alert-overlay');
+                if (secData.pending.length > 0 && alertOverlay.style.display !== 'flex') {
+                    const req = secData.pending[0];
+                    document.getElementById('alert-text').textContent = `${req.hostname || 'Unknown Device'} is requesting access.`;
+                    document.getElementById('alert-approve').onclick = () => approveRequest(req.id).then(() => alertOverlay.style.display = 'none');
+                    document.getElementById('alert-deny').onclick = () => rejectRequest(req.id).then(() => alertOverlay.style.display = 'none');
+                    alertOverlay.style.display = 'flex';
+                }
 
                 // Live connected clients
                 const clientRes = await fetch('/api/connected-clients');

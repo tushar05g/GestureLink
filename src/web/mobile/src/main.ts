@@ -6,10 +6,6 @@ let activePC: any = null;
 let devices: any[] = [];
 let authToken = localStorage.getItem("gesturelink_token");
 let hapticsEnabled = localStorage.getItem("gesturelink_haptics") !== "false";
-let stream: MediaStream | null = null;
-let sendingFrame = false;
-let cameraEnabled = true;
-
 // WebRTC State
 let peerConn: RTCPeerConnection | null = null;
 let myPeerId = Math.random().toString(36).substring(7);
@@ -23,8 +19,7 @@ const pairStatusText = document.getElementById("pairStatusText")!;
 const connBadge = document.getElementById("connBadge")!;
 const activeDeviceName = document.getElementById("activeDeviceName")!;
 const activeDeviceIP = document.getElementById("activeDeviceIP")!;
-const gestureText = document.getElementById("gestureText")!;
-const video = document.getElementById("video") as HTMLVideoElement;
+const remoteGestureStatus = document.getElementById("remoteGestureStatus")!;
 const touchZone = document.getElementById("touchZone")!;
 const deviceList = document.getElementById("deviceList")!;
 const navItems = document.querySelectorAll(".nav-item");
@@ -91,16 +86,26 @@ async function init() {
     if (hapticsEnabled) triggerHaptic();
   });
 
-  const cameraToggle = document.getElementById("cameraToggle") as HTMLInputElement;
-  const cameraOverlay = document.getElementById("cameraOffOverlay");
-  cameraToggle?.addEventListener('change', async (e: any) => {
-    cameraEnabled = e.target.checked;
-    if (cameraEnabled) {
-      if (cameraOverlay) cameraOverlay.style.display = 'none';
-      await initCamera();
-    } else {
-      if (cameraOverlay) cameraOverlay.style.display = 'flex';
-      stopCamera();
+  const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
+  pcCameraToggle?.addEventListener('change', async (e: any) => {
+    if (!activePC) {
+      alert("Connect to a PC first!");
+      pcCameraToggle.checked = false;
+      return;
+    }
+    try {
+      const active = e.target.checked;
+      const res = await fetch(`${location.origin}/api/hub/camera/toggle?target=${activePC.ip}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      if (remoteGestureStatus) remoteGestureStatus.textContent = active ? "CAMERA ON" : "CAMERA OFF";
+    } catch (err) {
+      alert(`Failed to toggle PC camera: ${err}`);
+      pcCameraToggle.checked = !e.target.checked;
     }
   });
 
@@ -214,7 +219,7 @@ globalThis.connectToPC = async (i: number) => {
     ws.onopen = () => {
       d.ws = ws;
       activatePC(d);
-      startVisionLoop();
+      // Removed startVisionLoop - processing happens on PC
       initWebRTC();
       renderDeviceList(); // re-render to show 'Active' state
     };
@@ -248,8 +253,8 @@ globalThis.connectToPC = async (i: number) => {
           return;
         }
         if (data.gesture) {
-          const old = gestureText.textContent;
-          gestureText.textContent = data.gesture;
+          const old = remoteGestureStatus.textContent;
+          remoteGestureStatus.textContent = data.gesture;
           if (data.gesture !== old && data.gesture !== 'IDLE') triggerHaptic(ImpactStyle.Light);
         }
       } catch (_) {}
@@ -528,7 +533,6 @@ saveAppShortcut.onclick = async () => {
 };
 
 async function startApp() {
-  await initCamera();
   addDeviceToList(location.hostname, "Hub (Primary)");
   // @ts-ignore
   globalThis.connectToPC(0);
@@ -556,42 +560,13 @@ async function triggerHaptic(style: ImpactStyle = ImpactStyle.Light) {
   if (navigator.vibrate) navigator.vibrate(style === ImpactStyle.Heavy ? 40 : 15);
 }
 
-async function initCamera() {
-  if (!cameraEnabled) return;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 } });
-    video.srcObject = stream;
-  } catch (e) { console.error("Camera error", e); }
-}
-
-function stopCamera() {
-  if (stream) {
-    stream.getTracks().forEach(track => track.stop());
-    stream = null;
-    video.srcObject = null;
-  }
-}
-
-function startVisionLoop() {
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d")!;
-  setInterval(() => {
-    if (!cameraEnabled || !activePC?.ws || activePC.ws.readyState !== 1 || sendingFrame || !stream) return;
-    canvas.width = 640; canvas.height = 480;
-    ctx.drawImage(video, 0, 0, 640, 480);
-    sendingFrame = true;
-    canvas.toBlob(b => {
-      sendingFrame = false;
-      if (b) b.arrayBuffer().then(buf => activePC.ws.send(buf));
-    }, "image/jpeg", 0.5);
-  }, 40);
-}
 
 function setupTouchpad() {
   let lastX = 0, lastY = 0, startTime = 0;
   let lastTapTime = 0;
   let maxFingers = 0;
   let lastPinchDist = 0;
+  let lastMoveTime = 0;
   let isMoving = false;
   let isDragging = false;
   let isPinching = false;
@@ -624,11 +599,16 @@ function setupTouchpad() {
     maxFingers = Math.max(maxFingers, e.touches.length);
     
     if (e.touches.length === 1 && !isDragging) {
+      const now = Date.now();
+      if (now - lastMoveTime < 16) return;
+      
       const dx = e.touches[0].clientX - lastX;
       const dy = e.touches[0].clientY - lastY;
       lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      
       if (activePC?.ws?.readyState === 1) {
         activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
+        lastMoveTime = now;
       }
     } else if (e.touches.length === 1 && isDragging) {
       const dx = e.touches[0].clientX - lastX;

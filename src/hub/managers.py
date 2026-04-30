@@ -11,11 +11,43 @@ from typing import Dict, Set, Optional
 logger = logging.getLogger("gesture_control.remote")
 
 def detect_lan_ip() -> str:
+    # Allow manual override via .env
+    import os
+    env_ip = os.getenv("HUB_IP")
+    if env_ip:
+        return env_ip
+
     try:
+        # 1. Primary method: Connect to public DNS to find the default interface
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
-            return str(s.getsockname()[0])
+            best_ip = str(s.getsockname()[0])
+            # Heuristic: 172.16.0.x is very commonly a virtual adapter (WSL/VPN)
+            # If we find this, we'll double-check other interfaces.
+            if not best_ip.startswith("172.16.0."):
+                return best_ip
     except OSError:
+        pass
+
+    try:
+        # 2. Fallback: Scan all local IPs and pick the most likely LAN address
+        hostname = socket.gethostname()
+        ips = socket.gethostbyname_ex(hostname)[2]
+        # Filter out loopback
+        ips = [ip for ip in ips if not ip.startswith("127.")]
+        if not ips:
+            return "127.0.0.1"
+        
+        # Prioritize standard home/office ranges
+        for ip in ips:
+            if ip.startswith("192.168.") or ip.startswith("10."):
+                return ip
+            # Prioritize 172.x ranges that aren't the common 172.16.0 virtual range
+            if ip.startswith("172.") and not ip.startswith("172.16.0."):
+                return ip
+        
+        return ips[0]
+    except Exception:
         return "127.0.0.1"
 
 class SecurityManager:

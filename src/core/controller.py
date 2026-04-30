@@ -21,7 +21,8 @@ from src.core.utils import OneEuroFilter
 logger = logging.getLogger(__name__)
 
 pyautogui.PAUSE    = 0.0
-pyautogui.FAILSAFE = True
+pyautogui.FAILSAFE = False # Prevent crashes when cursor hits corners
+import time
 
 
 class _DragState(Enum):
@@ -69,9 +70,10 @@ class MouseController:
         self._shortcut_triggered = False
         self._shortcut_start_pos: tuple[float, float] | None = None
 
-        # Fractional movement accumulators for trackpad
         self._frac_x: float = 0.0
         self._frac_y: float = 0.0
+        self._last_move_time = 0.0
+        self._move_interval = 0.016 # ~60fps cap for mouse moves
 
         logger.info("MouseController ready — screen %dx%d",
                     cfg.screen_w, cfg.screen_h)
@@ -156,10 +158,13 @@ class MouseController:
         dx = abs(self._smooth_x - tx)
         dy = abs(self._smooth_y - ty)
         
-        # Only move if the change is above the threshold to prevent "pixel vibration"
+        # Only move if the change is above the threshold
         if dx > self.gc.move_threshold_px or dy > self.gc.move_threshold_px:
-            pyautogui.moveTo(int(self._smooth_x), int(self._smooth_y),
-                             duration=0, _pause=False)
+            try:
+                pyautogui.moveTo(int(self._smooth_x), int(self._smooth_y),
+                                 duration=0, _pause=False)
+            except Exception as e:
+                logger.error(f"Move Error: {e}")
 
     def _reset_drag(self) -> None:
         if self._drag_state == _DragState.DRAGGING:
@@ -245,7 +250,14 @@ class MouseController:
 
     def handle_touch_move(self, dx: float, dy: float) -> str:
         """Handle relative movement from phone trackpad."""
-        sens = max(1.0, self.gc.smoothing * 40.0) 
+        now = time.time()
+        if now - self._last_move_time < self._move_interval:
+             return "RATE_LIMITED"
+        
+        # Dynamic sensitivity based on movement speed
+        speed = (dx*dx + dy*dy)**0.5
+        boost = 1.0 + min(2.0, speed / 5.0) # Move faster when finger moves faster
+        sens = max(1.0, self.gc.smoothing * 30.0) * boost 
         
         self._frac_x += dx * sens
         self._frac_y += dy * sens
@@ -257,8 +269,11 @@ class MouseController:
         self._frac_y -= move_y
         
         if move_x != 0 or move_y != 0:
-            print(f"DEBUG: Moving mouse by {move_x}, {move_y}")
-            pyautogui.moveRel(move_x, move_y, _pause=False)
+            try:
+                pyautogui.moveRel(move_x, move_y, _pause=False)
+                self._last_move_time = now
+            except Exception as e:
+                logger.error(f"Touch Move Error: {e}")
             
         return "TOUCH MOVE"
 

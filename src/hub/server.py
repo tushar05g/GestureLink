@@ -24,6 +24,17 @@ from src.core.controller import MouseController
 from src.core.shortcuts import ShortcutManager
 from src.core.vision import VisionProcessor
 from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
+from src.core.vision_worker import AsyncVisionWorker
+
+# Checklist:
+# | 1 | Hub starts without any error. | ✅ Passed | No startup errors. |
+# | 2 | QR code and pin showing on hub UI. | ✅ Passed | Dynamic IP detection working. |
+# | 4 | Hub-mobile connection is perfect. | ✅ Passed | User confirmed successful control. |
+# | 5 | Instant cursor control shift to mobile. | ✅ Passed | Verified by user. |
+# | 8 | Hub camera working for gestures. | 🛠 Testing | Fixed loop logic. |
+# | 11 | Mobile UI button for Hub camera. | ✅ Passed | New "Remote Intelligence" card. |
+# | 14 | Multiprocessing for Vision. | ✅ Passed | Implemented and verified. |
+# | 13 | Entire flow working without lag. | ⏳ Testing | Throttled and optimized. |
 
 load_dotenv()
 logger = logging.getLogger("gesture_control.remote")
@@ -74,9 +85,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     security = SecurityManager(SECURITY_FILE)
     tokens = TokenManager()
     discovery = DeviceDiscovery(port=port)
-    vision = VisionProcessor(CONFIG)
+    discovery = DeviceDiscovery(port=port)
+    vision = AsyncVisionWorker(CONFIG) # Use multiprocessing worker
+    vision.start()
+    shortcuts = ShortcutManager()
     shortcuts = ShortcutManager()
     mouse = MouseController(CONFIG, shortcuts=shortcuts, responsive=True)
+    
+    # Store in app state for access from other endpoints
+    app.state.vision = vision
+    app.state.mouse = mouse
+    app.state.camera_active = False
+    app.state.camera_task = None
     
     # Shared state — track live WebSocket sessions for the dashboard
     connected_clients: Dict[str, dict] = {}
@@ -134,6 +154,61 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.get("/api/discovered")
     async def get_discovered() -> JSONResponse:
         return JSONResponse({"devices": discovery.discovered_devices})
+
+    async def _hub_camera_loop():
+        import cv2
+        logger.info("Hub camera loop: Attempting to open camera...")
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            logger.error("Hub camera loop: Could not open camera.")
+            app.state.camera_active = False
+            return
+
+        try:
+            while app.state.camera_active:
+                ret, frame = cap.read()
+                if not ret:
+                    await asyncio.sleep(0.01)
+                    continue
+                
+                _, frame_jpeg = cv2.imencode('.jpg', frame)
+                state = await app.state.vision.process_frame(frame_jpeg.tobytes())
+                if state:
+                    app.state.mouse.update(state)
+                
+                await asyncio.sleep(0.01)
+        except Exception as e:
+            logger.error(f"Hub camera loop error: {e}")
+        finally:
+            cap.release()
+            app.state.camera_active = False
+            logger.info("Hub camera loop: Released.")
+
+    @app.post("/api/hub/camera/toggle")
+    async def toggle_hub_camera(payload: Annotated[dict, Body(...)], target: Optional[str] = Query(None)) -> JSONResponse:
+        # If target is provided and not local, proxy to agent
+        if target and target not in ("localhost", "127.0.0.1", detect_lan_ip()):
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(f"http://{target}:8001/api/camera/toggle", json=payload, timeout=2.0)
+                    return JSONResponse(resp.json())
+            except Exception as e:
+                logger.error("Proxy camera toggle failed for %s: %s", target, e)
+                return JSONResponse({"ok": False, "error": str(e)})
+
+        active = payload.get("active", False)
+        if active and not app.state.camera_active:
+            app.state.camera_active = True
+            app.state.camera_task = asyncio.create_task(_hub_camera_loop())
+            logger.info("Hub local camera turned ON")
+        elif not active and app.state.camera_active:
+            app.state.camera_active = False
+            # Wait for task to finish or just let it die
+            app.state.camera_task = None
+            logger.info("Hub local camera turned OFF")
+        
+        return JSONResponse({"ok": True, "active": app.state.camera_active})
 
     @app.get("/api/apps")
     async def get_apps(ip: Optional[str] = None) -> JSONResponse:
@@ -353,10 +428,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             logger.info("Client disconnected: %s", client_ip)
 
     async def _handle_vision_frame(ws, frame_bytes, vision, mouse):
-        frame = vision.decode_frame(frame_bytes)
-        if frame is not None:
-            # This might still be slow, but it's now in its own task!
-            state = await vision.process_frame(frame)
+        # AsyncVisionWorker handles the queue and process management
+        state = await vision.process_frame(frame_bytes)
+        if state:
             status = mouse.update(state)
             try:
                 await ws.send_json({"status": status, "type": "gesture"})
@@ -365,29 +439,29 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def _handle_ws_message(ws, msg, vision, mouse):
         try:
             data = json.loads(msg["text"])
-        except json.JSONDecodeError:
-            return
-        mtype = data.get("type")
-        
-        if mtype in ("touch", "move"):
-            res = mouse.handle_touch_move(float(data.get("dx", 0)), float(data.get("dy", 0)))
-            await ws.send_json({"status": res})
-        elif mtype == "click":
-            res = mouse.handle_click(data.get("button", "left"))
-            await ws.send_json({"status": res})
-        elif mtype in ("click_down", "click_up"):
-            is_down = (mtype == "click_down")
-            res = mouse.handle_click_state(data.get("button", "left"), is_down)
-            await ws.send_json({"status": res})
-        elif mtype == "scroll":
-            res = mouse.handle_touch_scroll(float(data.get("dy", 0)))
-            await ws.send_json({"status": res})
-        elif mtype == "zoom":
-            res = mouse.handle_touch_zoom(float(data.get("delta", 0)))
-            await ws.send_json({"status": res})
-        elif mtype == "shortcut":
-            res = mouse.handle_touch_shortcut(data.get("slot", ""))
-            await ws.send_json({"status": res})
+            mtype = data.get("type")
+            
+            if (mtype in ("touch", "move")):
+                mouse.handle_touch_move(float(data.get("dx", 0)), float(data.get("dy", 0)))
+                # No response needed for high-frequency moves
+            elif mtype == "click":
+                res = mouse.handle_click(data.get("button", "left"))
+                await ws.send_json({"status": res})
+            elif mtype in ("click_down", "click_up"):
+                is_down = (mtype == "click_down")
+                res = mouse.handle_click_state(data.get("button", "left"), is_down)
+                await ws.send_json({"status": res})
+            elif mtype == "scroll":
+                res = mouse.handle_touch_scroll(float(data.get("dy", 0)))
+                await ws.send_json({"status": res})
+            elif mtype == "zoom":
+                res = mouse.handle_touch_zoom(float(data.get("delta", 0)))
+                await ws.send_json({"status": res})
+            elif mtype == "shortcut":
+                res = mouse.handle_touch_shortcut(data.get("slot", ""))
+                await ws.send_json({"status": res})
+        except Exception as e:
+            logger.error("WS Message Error: %s", e)
 
     # Static Assets
     if MOBILE_DIST.exists():
@@ -460,11 +534,19 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.on_event("shutdown")
     def shutdown():
         discovery.stop()
-        vision.close()
+        vision.stop()
+        logger.info("Hub shutting down...")
 
     return app
 
 def run():
+    import multiprocessing
+    if platform.system() == "Windows":
+        multiprocessing.freeze_support()
+        try:
+            multiprocessing.set_start_method('spawn', force=True)
+        except RuntimeError: pass
+
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")

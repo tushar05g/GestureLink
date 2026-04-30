@@ -478,23 +478,23 @@
       <section id="controlTab" class="tab-content active">
         <div class="card">
           <div class="card-title">
-            <span>Vision Engine</span>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span id="gestureText" style="color: var(--accent); font-family: monospace; font-size: 0.75rem;">IDLE</span>
+            <span>Remote PC Intelligence</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span id="remoteGestureStatus" style="color: var(--accent); font-family: monospace; font-size: 0.75rem;">CAMERA OFF</span>
               <label class="switch">
-                <input type="checkbox" id="cameraToggle" checked>
+                <input type="checkbox" id="pcCameraToggle">
                 <span class="slider"></span>
               </label>
             </div>
           </div>
-          <div class="video-wrap">
-            <video id="video" autoplay playsinline muted></video>
-            <div id="cameraOffOverlay" style="display:none; position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); color: var(--text-secondary);">
-              <i class="fas fa-video-slash" style="font-size: 2rem; margin-bottom: 12px;"></i>
-              <span>Engine Paused</span>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: rgba(0,255,149,0.05); border-radius: 12px; border: 1px solid rgba(0,255,149,0.1);">
+            <div style="font-size: 1.5rem; color: var(--accent);"><i class="fas fa-video"></i></div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary);">
+              Toggle the <b>PC's built-in camera</b> to enable gesture recognition on the target machine.
             </div>
           </div>
         </div>
+
 
         <div class="card">
           <div class="card-title">Precision Trackpad</div>
