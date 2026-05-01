@@ -295,7 +295,7 @@
         </div>
         <div id="scanStatus" class="small" style="margin-top: 10px;"></div>
 
-        <h3 style="margin-top: 24px;">Connections (Max 2)</h3>
+        <h3 style="margin-top: 24px;">Connections</h3>
         <div id="deviceList">
           <p class="small">No devices connected.</p>
         </div>
@@ -527,7 +527,6 @@
     }
 
     async function connectToPC(i) {
-      if (devices.filter(d => d.ws).length >= 2) { alert("Max 2 active connections."); return; }
       const d = devices[i];
 
       // Smart WebSocket Protocol Handling

@@ -94,13 +94,15 @@ def build_mobile():
         return
 
     try:
+        # On Windows, npm is usually npm.cmd, and shell=True is often required
+        use_shell = (os.name == "nt")
         subprocess.run(
             ["npm", "install"],
-            cwd=str(mobile_dir), check=True
+            cwd=str(mobile_dir), check=True, shell=use_shell
         )
         subprocess.run(
             ["npm", "run", "build"],
-            cwd=str(mobile_dir), check=True
+            cwd=str(mobile_dir), check=True, shell=use_shell
         )
     except subprocess.CalledProcessError as e:
         error(f"npm build failed: {e}")
@@ -108,7 +110,7 @@ def build_mobile():
     if not dist_dir.exists():
         error("Mobile dist/ folder not created — npm build may have failed.")
 
-    success(f"Mobile frontend built → {dist_dir}")
+    success(f"Mobile frontend built -> {dist_dir}")
 
 
 # ─── Step 3: Convert logo.png → logo.ico ──────────────────────────────────────
@@ -124,7 +126,7 @@ def convert_icon():
         warn("logo.png not found — .exe will not have a custom icon.")
         return
 
-    log("Converting logo.png → logo.ico...")
+    log("Converting logo.png -> logo.ico...")
     try:
         from PIL import Image
         img = Image.open(logo_png)
@@ -177,7 +179,7 @@ def copy_to_release(paths: list[Path]):
     for p in paths:
         dest = release_dir / p.name
         shutil.copy2(p, dest)
-        log(f"  Copied {p.name} → release/")
+        log(f"  Copied {p.name} -> release/")
 
     success(f"Release files ready in: {release_dir}")
 

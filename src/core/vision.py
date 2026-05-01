@@ -495,27 +495,24 @@ class VisionProcessor:
 
     def draw_landmarks(self, frame: np.ndarray, state: GestureState) -> np.ndarray:
         """Draw hand landmarks and gesture status onto the frame."""
-        import mediapipe as mp
         annotated = frame.copy()
-        
-        if state.landmarks:
-            # Draw skeletons for each hand
-            for hand_lms in state.landmarks:
-                # MediaPipe Landmark objects don't have a format suitable for drawing_utils directly
-                # so we just draw the dots manually for simplicity/speed
-                h, w, _ = annotated.shape
-                for lm in hand_lms.values():
-                    cx, cy = int(lm['x'] * w), int(lm['y'] * h)
-                    cv2.circle(annotated, (cx, cy), 3, (0, 255, 149), -1)
+        h, w, _ = annotated.shape
 
-        # Draw Gesture Status
+        # state.landmarks is a flat list[dict[str,float]] with 21 entries (one per landmark)
+        if state.landmarks:
+            for lm in state.landmarks:
+                cx = int(lm['x'] * w)
+                cy = int(lm['y'] * h)
+                cv2.circle(annotated, (cx, cy), 4, (0, 255, 149), -1)
+
+        # Draw Gesture Status text
         if state.gesture and state.gesture != Gesture.IDLE:
             cv2.putText(annotated, f"GESTURE: {state.gesture.name}", (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 149), 2)
         else:
             cv2.putText(annotated, "WAITING FOR HAND...", (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (150, 150, 150), 2)
-                        
+
         return annotated
 
     def close(self) -> None:

@@ -105,8 +105,6 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     # Store in app state for access from other endpoints
     app.state.vision = vision_worker
     app.state.vision_processor = vision_processor
-    from concurrent.futures import ThreadPoolExecutor
-    app.state.executor = ThreadPoolExecutor(max_workers=2)
     app.state.mouse = mouse
     app.state.camera_active = False
     app.state.camera_task = None
@@ -202,38 +200,37 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 ret, frame = cap.read()
                 if not ret:
                     consecutive_failures += 1
-                    if consecutive_failures > 30: # 1 second of failure
-                         logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
-                         break
+                    if consecutive_failures > 30:  # ~1 second of failure
+                        logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
+                        break
                     await asyncio.sleep(0.03)
                     continue
-                
+
                 consecutive_failures = 0
-                # AI Inference - Use persistent ThreadPool to avoid blocking or context switching overhead
                 try:
-                    # Draw 'Waiting' text by default on a copy
-                    annotated_frame = app.state.vision_processor.draw_landmarks(frame, GestureState())
-                    
-                    # Run vision sync in thread
-                    state = await asyncio.get_event_loop().run_in_executor(
-                        app.state.executor, 
-                        app.state.vision_processor.process_frame_sync, 
-                        frame
-                    )
-                    
-                    # DIAGNOSTIC: Draw a Red Box in the corner to prove this is the annotated frame
-                    cv2.rectangle(annotated_frame, (10, 10), (100, 100), (0, 0, 255), -1)
-                    cv2.putText(annotated_frame, "AI ACTIVE", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-                    
+                    # --- AI Inference (async, non-blocking) ---
+                    # process_frame() is correctly awaited here — do NOT use
+                    # process_frame_sync() inside a running asyncio event loop
+                    # because it internally calls asyncio.run(), which would crash.
+                    state = await app.state.vision_processor.process_frame(frame)
+
+                    # --- Drive the mouse from the gesture state ---
+                    # This is the critical call that was previously missing.
+                    if state.gesture.value != "IDLE":
+                        app.state.mouse.update(state)
+
+                    # --- Annotate the frame for the live stream ---
+                    annotated_frame = app.state.vision_processor.draw_landmarks(frame, state)
+
                     _, jpeg = cv2.imencode('.jpg', annotated_frame)
                     hub_video_frame = jpeg.tobytes()
                 except Exception as e:
-                    logger.error(f"Inference error in loop: {e}")
-                    # Fallback to simple encoded frame
+                    logger.error(f"Inference error in hub camera loop: {e}")
+                    # Fallback: stream the raw frame so the feed stays alive
                     _, frame_jpeg = cv2.imencode('.jpg', frame)
                     hub_video_frame = frame_jpeg.tobytes()
-                
-                await asyncio.sleep(0.01)
+
+                await asyncio.sleep(0.033)  # ~30 fps cap
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")
         finally:
