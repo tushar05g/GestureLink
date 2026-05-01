@@ -1,101 +1,60 @@
-# ✦ Gesture Control — Productivity Edition
+# 🛰 GestureLink: The Unified AI Gesture Suite
 
-> Control your Windows PC with hand gestures via your webcam. No special hardware needed.
-
----
-
-## Gesture Reference
-
-| Hand Shape | Action |
-|---|---|
-| ☝️ Index finger only, pointing | **Move cursor** — tip position maps to screen |
-| 🤏 Pinch (thumb + index close) | **Left click** |
-| 🤏 Pinch + hold 8 frames | **Click & drag** — release pinch to drop |
-| ✌️ Index + middle up, move hand up/down | **Scroll** |
+GestureLink transforms your computer into a futuristic, touchless command center. Using only your hand movements or your mobile phone as a super-trackpad, you can control multiple computers with professional precision.
 
 ---
 
-## File Structure
+## ✨ Key Features
 
-```
-gesture_control/
-├── src/
-│   ├── __init__.py
-│   ├── config.py       # All thresholds & sensitivity (tune here)
-│   ├── vision.py       # MediaPipe hand tracking + gesture classifier
-│   ├── controller.py   # PyAutoGUI mouse/scroll actions
-│   └── app.py          # Main loop + OpenCV overlay
-├── run.py              # Entry point
-├── requirements.txt
-└── README.md
-```
+### 🖐 High-Precision Hand Control
+- **Adaptive Cursor**: Silky smooth movement using **One Euro Filter** technology.
+- **Smart Clicks**: Velocity-aware detection prevents accidental clicks.
+- **App Shortcuts**: Launch your favorite apps with simple hand poses.
+
+### 📱 Mobile Super-Trackpad (PWA)
+- **Zero-Install**: Scan a QR code and you're ready to go.
+- **Multi-Touch Gestures**: Two-finger scroll, right-click, and **Pinch-to-Zoom**.
+- **Double-Tap Drag**: Effortlessly move windows and select text.
+- **Hold-to-Launch**: Long-press with 3 or 4 fingers to trigger shortcuts securely.
 
 ---
 
-## Setup
+## 🚀 Getting Started (The "Double-Click" Workflow)
 
-### 1. Install dependencies
-```bash
-pip install -r requirements.txt
-```
+GestureLink is designed for everyone, no terminal required.
 
-### 2. Run
-```bash
-python run.py
-```
+### 1. Host your Hub (Main PC)
+- Double-click **`Start_Hub.py`**.
+- If it's your first time, the **Visual Installer** will guide you.
+- Once the Dashboard appears, scan the **QR Code** with your phone.
 
-An overlay window will open showing your webcam feed with landmarks.
-Press **Q** or **Escape** to quit.
+### 2. Connect an Agent (Secondary PC/Laptop)
+- Copy the folder to your laptop and double-click **`Start_Agent.py`**.
+- It will automatically find your Hub and wait for your phone to authorize it.
 
 ---
 
-## How It Works
+## 🛠 Advanced Configuration
 
-```
-Webcam frame (OpenCV)
-      │
-      ▼
-VisionProcessor (MediaPipe)
-  → 21 hand landmarks detected
-  → Gesture classified (POINTING / PINCH / SCROLL / IDLE)
-      │
-      ▼
-MouseController (PyAutoGUI)
-  → POINTING  : smoothed cursor movement
-  → PINCH     : click or drag (state machine)
-  → SCROLL    : scroll wheel tick
-      │
-      ▼
-OpenCV Overlay
-  → Landmarks + gesture status + FPS displayed
-```
+All settings (Sensitivity, Smoothing, Shortcuts) can be tuned directly from the **Mobile Dashboard** or the **Hub Settings** window.
+
+### Gestures Map:
+| Action | Hand Gesture | Mobile Touchpad |
+| :--- | :--- | :--- |
+| **Move Cursor** | Thumb Extended | Single Finger Slide |
+| **Left Click** | Thumb + Index Snap | Single Tap |
+| **Right Click** | Thumb + Middle Snap | Two-Finger Tap |
+| **Scroll** | Four Fingers Up | Two-Finger Slide |
+| **Zoom** | *Gesture Coming Soon* | Two-Finger Pinch |
+| **Shortcuts** | Hold Pose (1.5s) | Long-Press (1.0s) |
 
 ---
 
-## Tuning Guide (`src/config.py`)
-
-| Setting | Default | What it does |
-|---|---|---|
-| `gesture.pinch_threshold` | `0.045` | Lower = harder to click accidentally. Raise if clicks don't fire. |
-| `gesture.smoothing` | `0.25` | Lower = smoother cursor, slightly laggier. |
-| `gesture.frame_margin` | `0.15` | Increase if cursor hits edges too easily. |
-| `gesture.drag_hold_frames` | `8` | Frames of pinch before drag starts. |
-| `gesture.scroll_speed` | `3` | Scroll units per tick. |
-| `gesture.scroll_threshold` | `0.03` | Min hand movement to trigger scroll tick. |
+## 🔒 Security & Privacy
+- **PIN-Based Pairing**: Only authorized devices can control your mouse.
+- **Consent Notifications**: The Hub asks for your permission before any new device connects.
+- **Local-First**: All AI processing happens on your local machine.
 
 ---
 
-## Tips
-
-- **Good lighting** makes a big difference for MediaPipe accuracy.
-- Keep your hand **30–60 cm** from the camera.
-- The overlay window is a **mirror** — move right to go right on screen.
-- The **frame margin** (outer 15% of camera view) is dead zone — helps prevent cursor from getting stuck at screen edges.
-
----
-
-## Coming Next (Phase 2 — Creativity)
-- Air drawing with index finger
-- Peace sign ✌️ → Screenshot
-- Fist → Undo (Ctrl+Z)
-- Open palm → Show desktop
+*Developed with ❤️ by the GestureLink Team.*

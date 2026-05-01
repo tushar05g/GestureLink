@@ -1,6 +1,11 @@
 # GestureLink Ignores
+*.zip
+.installed
+cert.pem
+key.pem
 node_modules/
-venv/
+
+# Python compiled files
 __pycache__/
 *.pyc
 .env
@@ -12,6 +17,55 @@ cert.pem
 key.pem
 dist/
 build/
+dist/
+release/
 *.egg-info/
-*.zip
-.installed
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# PyInstaller config (Include these for reproducible builds)
+!*.manifest
+!*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.tox/
+.nox/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+
+# Logs and DB
+*.log
+*.sqlite3
+*.db

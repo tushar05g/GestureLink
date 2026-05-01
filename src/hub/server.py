@@ -25,6 +25,7 @@ from src.core.shortcuts import ShortcutManager
 from src.core.vision import VisionProcessor
 from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
 from src.core.vision_worker import AsyncVisionWorker
+from src.core.utils import resource_path
 
 # Checklist:
 # | 1 | Hub starts without any error. | ✅ Passed | No startup errors. |
@@ -45,12 +46,15 @@ hub_camera_active: bool = False
 
 APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
-CLIENT_HTML = HUB_DIR.parent / "web" / "client" / "remote_client.html"
-HUB_HTML = HUB_DIR.parent / "web" / "hub" / "hub.html"
-MOBILE_DIST = HUB_DIR.parent / "web" / "mobile" / "dist"
+
+# Use resource_path() so these resolve correctly inside a PyInstaller .exe
+CLIENT_HTML  = resource_path("src/web/client/remote_client.html")
+HUB_HTML     = resource_path("src/web/hub/hub.html")
+MOBILE_DIST  = resource_path("src/web/mobile/dist")
 SETTINGS_FILE = HUB_DIR / "settings.json"
 SECURITY_FILE = HUB_DIR / "security.json"
-CERT_PEM = Path(__file__).resolve().parent.parent.parent / "cert.pem"
+CERT_PEM = resource_path("cert.pem")
+KEY_PEM  = resource_path("key.pem")
 
 def _save_settings(sensitivity: int, scroll_speed: int) -> None:
     try:
@@ -196,32 +200,37 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 ret, frame = cap.read()
                 if not ret:
                     consecutive_failures += 1
-                    if consecutive_failures > 30: # 1 second of failure
-                         logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
-                         break
+                    if consecutive_failures > 30:  # ~1 second of failure
+                        logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
+                        break
                     await asyncio.sleep(0.03)
                     continue
-                
+
                 consecutive_failures = 0
-                # AI Inference - Use local vision directly to avoid multiprocessing issues on Windows
                 try:
-                    # Draw 'Waiting' text by default on the raw frame
-                    annotated_frame = app.state.vision_processor.draw_landmarks(frame, GestureState())
-                    
-                    # Process frame (this is now sync-capable)
-                    state = app.state.vision_processor.process_frame_sync(frame)
-                    if state and state.gesture != Gesture.IDLE:
+                    # --- AI Inference (async, non-blocking) ---
+                    # process_frame() is correctly awaited here — do NOT use
+                    # process_frame_sync() inside a running asyncio event loop
+                    # because it internally calls asyncio.run(), which would crash.
+                    state = await app.state.vision_processor.process_frame(frame)
+
+                    # --- Drive the mouse from the gesture state ---
+                    # This is the critical call that was previously missing.
+                    if state.gesture.value != "IDLE":
                         app.state.mouse.update(state)
-                        annotated_frame = app.state.vision_processor.draw_landmarks(frame, state)
-                    
+
+                    # --- Annotate the frame for the live stream ---
+                    annotated_frame = app.state.vision_processor.draw_landmarks(frame, state)
+
                     _, jpeg = cv2.imencode('.jpg', annotated_frame)
                     hub_video_frame = jpeg.tobytes()
                 except Exception as e:
-                    logger.error(f"Inference error in loop: {e}")
+                    logger.error(f"Inference error in hub camera loop: {e}")
+                    # Fallback: stream the raw frame so the feed stays alive
                     _, frame_jpeg = cv2.imencode('.jpg', frame)
                     hub_video_frame = frame_jpeg.tobytes()
-                
-                await asyncio.sleep(0.01)
+
+                await asyncio.sleep(0.033)  # ~30 fps cap
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")
         finally:
@@ -471,15 +480,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "type": "mobile"
         }
         logger.info("Client connected: %s", client_ip)
-        async def vision_worker():
+        async def ws_receive_loop():
             try:
                 while True:
                     msg = await ws.receive()
                     if "bytes" in msg:
                         # Process vision in a background task so it doesn't block the loop
-                        asyncio.create_task(_handle_vision_frame(ws, msg["bytes"], vision, mouse))
+                        asyncio.create_task(_handle_vision_frame(ws, msg["bytes"], vision_worker, mouse))
                     elif "text" in msg:
-                        await _handle_ws_message(ws, msg, vision, mouse)
+                        await _handle_ws_message(ws, msg, vision_worker, mouse)
             except WebSocketDisconnect:
                 pass
             except Exception as e:
@@ -487,7 +496,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     logger.error("WS Loop Error: %s", e)
 
         try:
-            await vision_worker()
+            await ws_receive_loop()
         finally:
             connected_clients.pop(client_ip, None)
             logger.info("Client disconnected: %s", client_ip)
@@ -543,6 +552,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         async def icon192(): return FileResponse(MOBILE_DIST / "icon-192.png")
         @app.get("/icon-512.png")
         async def icon512(): return FileResponse(MOBILE_DIST / "icon-512.png")
+    
+    @app.get("/remote.html")
+    async def remote_page():
+        return FileResponse(CLIENT_HTML)
+
+    @app.get("/mobile.html")
+    async def mobile_page_alias():
+        if (MOBILE_DIST / "index.html").exists():
+            return FileResponse(MOBILE_DIST / "index.html")
+        return FileResponse(CLIENT_HTML) # Fallback
     
     @app.get("/hub")
     async def hub_page():
@@ -601,7 +620,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.on_event("shutdown")
     def shutdown():
         discovery.stop()
-        vision.stop()
+        vision_worker.stop()
         logger.info("Hub shutting down...")
 
     return app
@@ -621,8 +640,8 @@ def run():
     args = parser.parse_args()
     
     project_root = Path(__file__).resolve().parent.parent.parent
-    cert = project_root / "cert.pem"
-    key  = project_root / "key.pem"
+    cert = resource_path("cert.pem")
+    key  = resource_path("key.pem")
     ssl = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)} if cert.exists() else {}
     
     app = build_app(args.host, args.port)

@@ -10,3 +10,12 @@ PyOpenGL>=3.1.7
 PyOpenGL_accelerate>=3.1.7
 glfw>=2.6.0
 modal
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+websockets>=11.0
+python-dotenv>=1.0.0
+qrcode>=7.4.2
+zeroconf>=0.69.0
+httpx>=0.24.0
+python-multipart>=0.0.6
+Pillow>=9.5.0

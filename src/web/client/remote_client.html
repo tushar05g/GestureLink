@@ -214,21 +214,44 @@
     .small {
       font-size: 0.8rem;
     }
+
     #pairingOverlay {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: var(--bg); z-index: 10000;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 20px; text-align: center;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      text-align: center;
     }
+
     .pin-input {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 12px; padding: 15px; font-size: 24px;
-      color: white; text-align: center; letter-spacing: 10px;
-      width: 200px; margin: 20px 0; outline: none;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 15px;
+      font-size: 24px;
+      color: white;
+      text-align: center;
+      letter-spacing: 10px;
+      width: 200px;
+      margin: 20px 0;
+      outline: none;
     }
-    .pin-input:focus { border-color: var(--accent); }
-    .hidden { display: none !important; }
+
+    .pin-input:focus {
+      border-color: var(--accent);
+    }
+
+    .hidden {
+      display: none !important;
+    }
   </style>
 </head>
 
@@ -269,7 +292,8 @@
         </div>
 
         <div id="trackpadArea" style="display:none">
-          <div id="touchZone" style="width:100%; aspect-ratio:1/1.2; background:rgba(0,0,0,0.4); border-radius:16px; border:2px dashed var(--line); display:flex; align-items:center; justify-content:center; touch-action:none;">
+          <div id="touchZone"
+            style="width:100%; aspect-ratio:1/1.2; background:rgba(0,0,0,0.4); border-radius:16px; border:2px dashed var(--line); display:flex; align-items:center; justify-content:center; touch-action:none;">
             <span class="muted">Precision Trackpad</span>
           </div>
         </div>
@@ -295,7 +319,7 @@
         </div>
         <div id="scanStatus" class="small" style="margin-top: 10px;"></div>
 
-        <h3 style="margin-top: 24px;">Connections (Max 2)</h3>
+        <h3 style="margin-top: 24px;">Connections</h3>
         <div id="deviceList">
           <p class="small">No devices connected.</p>
         </div>
@@ -357,7 +381,7 @@
     pairBtn.onclick = async () => {
       const pin = pinInput.value;
       if (pin.length !== 6) { pairError.textContent = "Enter 6 digits"; return; }
-      
+
       try {
         const res = await fetch("/api/pair", {
           method: "POST",
@@ -425,13 +449,13 @@
       const y = e.touches[0].clientY;
       const dx = x - lastX;
       const dy = y - lastY;
-      
+
       if (e.touches.length === 1) {
-          activePC.ws.send(JSON.stringify({ type: 'touch', dx, dy }));
+        activePC.ws.send(JSON.stringify({ type: 'touch', dx, dy }));
       } else if (e.touches.length === 2) {
-          activePC.ws.send(JSON.stringify({ type: 'scroll', dy }));
+        activePC.ws.send(JSON.stringify({ type: 'scroll', dy }));
       }
-      
+
       lastX = x;
       lastY = y;
       e.preventDefault();
@@ -439,15 +463,15 @@
 
     touchZone.addEventListener('touchend', (e) => {
       if (e.touches.length === 0) { // All fingers up
-          if (Date.now() - touchStartTime < 200) {
-              const button = maxFingers === 1 ? 'left' : 'right';
-              if (activePC && activePC.ws) {
-                activePC.ws.send(JSON.stringify({ type: 'click', button }));
-                triggerHaptic(button === 'left' ? 'light' : 'medium');
-              }
+        if (Date.now() - touchStartTime < 200) {
+          const button = maxFingers === 1 ? 'left' : 'right';
+          if (activePC && activePC.ws) {
+            activePC.ws.send(JSON.stringify({ type: 'click', button }));
+            triggerHaptic(button === 'left' ? 'light' : 'medium');
           }
-          maxFingers = 0;
-          isTouching = false;
+        }
+        maxFingers = 0;
+        isTouching = false;
       }
       e.preventDefault();
     }, { passive: false });
@@ -527,7 +551,6 @@
     }
 
     async function connectToPC(i) {
-      if (devices.filter(d => d.ws).length >= 2) { alert("Max 2 active connections."); return; }
       const d = devices[i];
 
       // Smart WebSocket Protocol Handling
@@ -536,19 +559,19 @@
       let wsUrl = "";
 
       if (isHub) {
-          // If connecting to the Hub itself, use the direct endpoint
-          const proto = isHttps ? "wss:" : "ws:";
-          wsUrl = `${proto}//${window.location.host}/ws?token=${authToken}`;
+        // If connecting to the Hub itself, use the direct endpoint
+        const proto = isHttps ? "wss:" : "ws:";
+        wsUrl = `${proto}//${window.location.host}/ws?token=${authToken}`;
       } else if (isHttps) {
-          // If on HTTPS (ngrok) connecting to a REMOTE PC, use the relay
-          wsUrl = `wss://${window.location.host}/relay?target=${d.ip}&token=${authToken}`;
+        // If on HTTPS (ngrok) connecting to a REMOTE PC, use the relay
+        wsUrl = `wss://${window.location.host}/relay?target=${d.ip}&token=${authToken}`;
       } else {
-          // If on HTTP, connect directly to the target PC
-          let host = d.ip;
-          if (!host.includes(":") && !host.includes("ngrok") && !host.includes(".dev")) {
-            host = host + ":8000";
-          }
-          wsUrl = `ws://${host}/ws`; // Agents use a different secret token known only to the Hub
+        // If on HTTP, connect directly to the target PC
+        let host = d.ip;
+        if (!host.includes(":") && !host.includes("ngrok") && !host.includes(".dev")) {
+          host = host + ":8000";
+        }
+        wsUrl = `ws://${host}/ws`; // Agents use a different secret token known only to the Hub
       }
 
       console.log("Connecting to:", wsUrl);
@@ -613,14 +636,14 @@
       // Auto-add current server if not local
       const curHost = window.location.host;
       if (curHost && !devices.some(d => d.ip === curHost)) {
-          addDeviceToList(curHost, "Current Server (Cloud)");
-          // Auto-connect to the cloud server immediately
-          setTimeout(() => connectToPC(0), 500);
+        addDeviceToList(curHost, "Current Server (Cloud)");
+        // Auto-connect to the cloud server immediately
+        setTimeout(() => connectToPC(0), 500);
       }
 
       if (stream) return;
-      stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: "user", width: 640, height: 480 } 
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 640, height: 480 }
       });
       video.srcObject = stream;
       video.play();
