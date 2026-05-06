@@ -164,7 +164,7 @@ class GestureClassifier:
         pinky_ext  = _finger_extended(lm, 20, 18)
 
         # Index tip position as cursor anchor
-        cx, cy = 1.0 - lm[8].x, lm[8].y
+        cx, cy = lm[8].x, lm[8].y
 
         # Priority 0: Mode switch — pinky only hold
         if pinky_ext and not index_ext and not middle_ext and not ring_ext:
@@ -207,7 +207,7 @@ class GestureClassifier:
 
         thumb_index_dist = _dist(lm[4], lm[8])
 
-        cx, cy = 1.0 - lm[8].x, lm[8].y
+        cx, cy = lm[8].x, lm[8].y
 
         # Priority 0: Mode switch — pinky only
         if pinky_ext and not index_ext and not middle_ext and not ring_ext:

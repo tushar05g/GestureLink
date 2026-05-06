@@ -72,7 +72,7 @@ class CanvasController:
                 if self.paths:
                     self.paths.pop() # Simple erase for now
                     status = "ERASING"
-            elif gesture == "ROCK_RCLICK":
+            elif gesture == "RIGHT_CLICK":
                 if self.paths:
                     self.paths.pop()
                     status = "UNDO"
@@ -215,7 +215,7 @@ class BuilderController:
                     self.world.erase(cube.gx, cube.gy, cube.gz)
             status = "ERASING"
 
-        elif gesture == "ROCK_RCLICK":
+        elif gesture == "RIGHT_CLICK":
             self._painting   = False
             self._paint_hold = 0
             if self.world and self.world.undo():
