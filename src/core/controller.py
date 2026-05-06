@@ -59,6 +59,7 @@ class MouseController:
         self._drag_state:      _DragState = _DragState.IDLE
         self._drag_hold_count: int        = 0
         self._drag_release_grace: int      = 0
+        self._click_start_time: float      = 0.0
 
         self._prev_gesture: Gesture = Gesture.IDLE
 
@@ -103,11 +104,16 @@ class MouseController:
             status = "MOVE"
         elif state.gesture == Gesture.LEFT_CLICK:
             self._handle_move(sx, sy)
-            if self._drag_state != _DragState.DRAGGING and self._left_click_cooldown == 0:
-                pyautogui.mouseDown(button="left", _pause=False)
-                self._drag_state = _DragState.DRAGGING
-                self._drag_release_grace = 0
-            status = "DRAGGING"
+            now = time.time()
+            if self._drag_state == _DragState.IDLE and self._left_click_cooldown == 0:
+                self._drag_state = _DragState.COUNTING
+                self._click_start_time = now
+            elif self._drag_state == _DragState.COUNTING:
+                # If held for more than 300ms, start dragging
+                if now - self._click_start_time > 0.3:
+                    pyautogui.mouseDown(button="left", _pause=False)
+                    self._drag_state = _DragState.DRAGGING
+            status = "DRAGGING" if self._drag_state == _DragState.DRAGGING else "CLICK_WAIT"
         elif state.gesture == Gesture.RIGHT_CLICK:
             # Rock sign → right click
             self._reset_drag()
@@ -167,9 +173,14 @@ class MouseController:
                 logger.error(f"Move Error: {e}")
 
     def _reset_drag(self) -> None:
-        if self._drag_state == _DragState.DRAGGING:
-            # Add a small grace period (e.g. 3 frames) to handle camera jitter
-            # during a pinch-drag.
+        if self._drag_state == _DragState.COUNTING:
+            # Reached here because gesture changed or was lost before 300ms
+            pyautogui.click(button="left", _pause=False)
+            self._left_click_cooldown = self.gc.pinch_cooldown_frames
+            logger.debug("Single click triggered from short hold.")
+        
+        elif self._drag_state == _DragState.DRAGGING:
+            # Add a small grace period (e.g. 5 frames) to handle camera jitter
             self._drag_release_grace += 1
             if self._drag_release_grace < 5:
                 return
@@ -177,9 +188,11 @@ class MouseController:
             pyautogui.mouseUp(button="left", _pause=False)
             self._left_click_cooldown = self.gc.pinch_cooldown_frames
             logger.debug("Drag end (mouseUp).")
+
         self._drag_state      = _DragState.IDLE
         self._drag_hold_count = 0
         self._drag_release_grace = 0
+        self._click_start_time = 0.0
 
     def _handle_scroll(self, dy: float) -> str:
         if self._scroll_cooldown > 0:
