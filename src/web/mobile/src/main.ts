@@ -740,6 +740,8 @@ function setupTouchpad() {
   }, { passive: false });
 
   touchZone.addEventListener('touchend', (e: any) => {
+    if (e.touches.length > 0) return; // Wait until the last finger is lifted to prevent double-taps
+
     const now = Date.now();
     const duration = now - startTime;
 

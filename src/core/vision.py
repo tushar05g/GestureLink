@@ -166,10 +166,6 @@ class GestureClassifier:
         # Index tip position as cursor anchor
         cx, cy = lm[8].x, lm[8].y
 
-        # Priority 0: Mode switch — pinky only hold
-        if pinky_ext and not index_ext and not middle_ext and not ring_ext:
-            return Gesture.MODE_SWITCH, cx, cy
-
         # Priority 1: Right click — rock sign (index + pinky)
         if index_ext and pinky_ext and not middle_ext and not ring_ext:
             return Gesture.RIGHT_CLICK, cx, cy
@@ -208,10 +204,6 @@ class GestureClassifier:
         thumb_index_dist = _dist(lm[4], lm[8])
 
         cx, cy = lm[8].x, lm[8].y
-
-        # Priority 0: Mode switch — pinky only
-        if pinky_ext and not index_ext and not middle_ext and not ring_ext:
-            return Gesture.MODE_SWITCH, cx, cy
 
         if thumb_index_dist < gc.pinch_threshold:
             return Gesture.THUMB_PINCH, cx, cy
