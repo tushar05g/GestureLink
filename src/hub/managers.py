@@ -10,45 +10,49 @@ from typing import Dict, Set, Optional
 
 logger = logging.getLogger("gesture_control.remote")
 
-def detect_lan_ip() -> str:
+def detect_lan_ip(all_ips: bool = False) -> str | list[str]:
     # Allow manual override via .env
     import os
     env_ip = os.getenv("HUB_IP")
-    if env_ip:
+    if env_ip and not all_ips:
         return env_ip
 
+    found_ips = set()
     try:
-        # 1. Primary method: Connect to public DNS to find the default interface
+        # 1. Primary method: Find the default interface
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
             best_ip = str(s.getsockname()[0])
-            # Heuristic: 172.16.0.x is very commonly a virtual adapter (WSL/VPN)
-            # If we find this, we'll double-check other interfaces.
-            if not best_ip.startswith("172.16.0."):
-                return best_ip
+            found_ips.add(best_ip)
     except OSError:
         pass
 
     try:
-        # 2. Fallback: Scan all local IPs and pick the most likely LAN address
+        # 2. Get all IPs assigned to this hostname
         hostname = socket.gethostname()
         ips = socket.gethostbyname_ex(hostname)[2]
-        # Filter out loopback
-        ips = [ip for ip in ips if not ip.startswith("127.")]
-        if not ips:
-            return "127.0.0.1"
-        
-        # Prioritize standard home/office ranges
         for ip in ips:
-            if ip.startswith("192.168.") or ip.startswith("10."):
-                return ip
-            # Prioritize 172.x ranges that aren't the common 172.16.0 virtual range
-            if ip.startswith("172.") and not ip.startswith("172.16.0."):
-                return ip
-        
-        return ips[0]
+            if not ip.startswith("127."):
+                found_ips.add(ip)
     except Exception:
-        return "127.0.0.1"
+        pass
+
+    if not found_ips:
+        return ["127.0.0.1"] if all_ips else "127.0.0.1"
+
+    # Filter to only LAN-likely ranges
+    lan_ips = [ip for ip in found_ips if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.")]
+    
+    if all_ips:
+        return sorted(list(lan_ips if lan_ips else found_ips))
+    
+    # Return the "best" one
+    if lan_ips:
+        # Prefer the one from the default interface if it's in the LAN range
+        if next(iter(found_ips)) in lan_ips:
+            return next(iter(found_ips))
+        return lan_ips[0]
+    return next(iter(found_ips))
 
 class SecurityManager:
     def __init__(self, security_file: Path):
@@ -151,7 +155,7 @@ class DeviceDiscovery(ServiceListener):
         self.browser: Optional[ServiceBrowser] = None
 
     def start(self) -> None:
-        local_ip = detect_lan_ip()
+        local_ips = detect_lan_ip(all_ips=True)
         hostname = socket.gethostname().replace(".local", "")
         service_type = "_gesturelink._tcp.local."
         service_name = f"GestureLink-Hub-{hostname}.{service_type}"
@@ -159,7 +163,7 @@ class DeviceDiscovery(ServiceListener):
         self.info = ServiceInfo(
             service_type,
             service_name,
-            addresses=[socket.inet_aton(local_ip)],
+            addresses=[socket.inet_aton(ip) for ip in local_ips],
             port=self.port,
             properties={"type": "hub", "version": "1.0.0"},
             server=f"{hostname}.local.",

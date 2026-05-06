@@ -478,7 +478,7 @@
       <section id="controlTab" class="tab-content active">
         <div class="card">
           <div class="card-title">
-            <span>Remote PC Intelligence</span>
+            <span>Remote Intelligence</span>
             <div style="display: flex; align-items: center; gap: 12px;">
               <span id="remoteGestureStatus" style="color: var(--accent); font-family: monospace; font-size: 0.75rem;">CAMERA OFF</span>
               <label class="switch">
@@ -490,9 +490,27 @@
           <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: rgba(0,255,149,0.05); border-radius: 12px; border: 1px solid rgba(0,255,149,0.1);">
             <div style="font-size: 1.5rem; color: var(--accent);"><i class="fas fa-video"></i></div>
             <div style="font-size: 0.8rem; color: var(--text-secondary);">
-              Toggle the <b>PC's built-in camera</b> to enable gesture recognition on the target machine.
+              Toggle the <b>Hub's Camera</b> to enable gesture recognition on this PC.
             </div>
           </div>
+        </div>
+
+        <!-- Vision Mode Selector -->
+        <div class="card">
+          <div class="card-title">Active Vision Mode</div>
+          <div style="display: flex; gap: 8px;">
+            <button class="mode-btn active" data-mode="0" style="flex:1; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-family: inherit; font-weight: 700; font-size: 0.75rem;">CURSOR</button>
+            <button class="mode-btn" data-mode="1" style="flex:1; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-family: inherit; font-weight: 700; font-size: 0.75rem;">CANVAS</button>
+            <button class="mode-btn" data-mode="2" style="flex:1; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-family: inherit; font-weight: 700; font-size: 0.75rem;">BUILDER</button>
+          </div>
+          <style>
+            .mode-btn.active {
+              background: var(--accent-glow) !important;
+              border-color: var(--accent) !important;
+              color: var(--accent) !important;
+              box-shadow: 0 0 15px var(--accent-glow);
+            }
+          </style>
         </div>
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import io
 import json
 import logging
@@ -22,10 +23,11 @@ import websockets
 from src.core.config import CONFIG
 from src.core.controller import MouseController
 from src.core.shortcuts import ShortcutManager
-from src.core.vision import VisionProcessor
+from src.core.vision import VisionProcessor, Gesture
 from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
 from src.core.vision_worker import AsyncVisionWorker
 from src.core.utils import resource_path
+from src.core.modes import CanvasController, BuilderController
 
 # Checklist:
 # | 1 | Hub starts without any error. | ✅ Passed | No startup errors. |
@@ -39,6 +41,20 @@ from src.core.utils import resource_path
 
 load_dotenv()
 logger = logging.getLogger("gesture_control.remote")
+
+class EndpointFilter(logging.Filter):
+    """Silences aggressive polling logs for specific endpoints."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        # Silence heartbeat endpoints
+        silence = [
+            "/api/security/pending",
+            "/api/hub/camera/status",
+            "/api/connected-clients",
+            "/api/discovered"
+        ]
+        return not any(path in msg for path in silence)
+
 
 # Global state for camera streaming
 hub_video_frame: bytes | None = None
@@ -79,7 +95,34 @@ def _load_settings() -> None:
             logger.error("Failed to load settings: %s", e)
 
 def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
-    app = FastAPI(title="GestureLink Hub", version="1.1.0")
+    # --- LIFESPAN HANDLER (Startup/Shutdown) ---
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup
+        _load_settings()
+        discovery.start()
+        lan_ip = detect_lan_ip()
+        proto = "https" if CERT_PEM.exists() else "http"
+        print("\n" + "="*50)
+        print("STARTING GESTURELINK HUB...")
+        print(f"  * Local Dashboard:  {proto}://localhost:{port}/hub")
+        print(f"  * Mobile Access:    {proto}://{lan_ip}:{port}")
+        print(f"  * Pairing PIN:      {tokens.current_pin}")
+        print("="*50 + "\n")
+        logger.info("Hub Started successfully.")
+        
+        # Background tasks
+        app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
+        app.state.cleanup_task = asyncio.create_task(_cleanup_signals_loop())
+        
+        yield
+        
+        # Shutdown
+        discovery.stop()
+        vision_worker.stop()
+        logger.info("Hub shutting down...")
+
+    app = FastAPI(title="GestureLink Hub", version="1.1.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -105,32 +148,49 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     # Store in app state for access from other endpoints
     app.state.vision = vision_worker
     app.state.vision_processor = vision_processor
-    app.state.mouse = mouse
     app.state.camera_active = False
     app.state.camera_task = None
+    app.state.mouse = mouse
+    app.state.active_mode = 0 # 0=Cursor, 1=Canvas, 2=Builder
+    app.state.canvas = CanvasController(CONFIG)
+    app.state.builder = BuilderController(CONFIG)
     
     # Shared state — track live WebSocket sessions for the dashboard
     connected_clients: Dict[str, dict] = {}
 
-    # WebRTC Signaling Hub
-    signals: Dict[str, asyncio.Queue] = {}
+    # WebRTC Signaling Hub with Timestamp tracking for cleanup
+    signals: Dict[str, dict] = {} # {id: {"q": Queue, "last_poll": timestamp}}
+
+    async def _cleanup_signals_loop():
+        """B-02: Purge signaling queues for devices inactive for > 5 mins."""
+        import time
+        while True:
+            await asyncio.sleep(60)
+            now = time.time()
+            stale = [tid for tid, data in signals.items() if now - data["last_poll"] > 300]
+            for tid in stale:
+                logger.info(f"Cleaning up stale WebRTC queue for {tid}")
+                del signals[tid]
 
     @app.post("/api/webrtc/signal/{target_id}")
     async def webrtc_signal(target_id: str, payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        import time
         if target_id not in signals:
-            signals[target_id] = asyncio.Queue()
-        await signals[target_id].put(payload)
+            signals[target_id] = {"q": asyncio.Queue(), "last_poll": time.time()}
+        await signals[target_id]["q"].put(payload)
         return JSONResponse({"ok": True})
 
     @app.get("/api/webrtc/signal/{target_id}")
     async def webrtc_get_signals(target_id: str) -> JSONResponse:
+        import time
         if target_id not in signals:
-            signals[target_id] = asyncio.Queue()
+            signals[target_id] = {"q": asyncio.Queue(), "last_poll": time.time()}
+        
+        signals[target_id]["last_poll"] = time.time()
         try:
-            signal = await asyncio.wait_for(signals[target_id].get(), timeout=30.0)
+            signal = await asyncio.wait_for(signals[target_id]["q"].get(), timeout=30.0)
             return JSONResponse({"ok": True, "signal": signal})
         except asyncio.TimeoutError:
-            # Issue 10: suppress 408 log spam — this is expected long-poll behaviour
             return JSONResponse({"ok": False, "error": "timeout"}, status_code=200)
 
     @app.get("/health")
@@ -195,6 +255,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         hub_camera_active = True
         consecutive_failures = 0
+        loop = asyncio.get_event_loop()
         try:
             while app.state.camera_active:
                 ret, frame = cap.read()
@@ -203,34 +264,53 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     if consecutive_failures > 30:  # ~1 second of failure
                         logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
                         break
-                    await asyncio.sleep(0.03)
+                    await asyncio.sleep(0.01)
                     continue
 
                 consecutive_failures = 0
+                # Flip at the start so AI and Display are ALWAYS in sync
+                frame = cv2.flip(frame, 1)
+                
                 try:
-                    # --- AI Inference (async, non-blocking) ---
-                    # process_frame() is correctly awaited here — do NOT use
-                    # process_frame_sync() inside a running asyncio event loop
-                    # because it internally calls asyncio.run(), which would crash.
-                    state = await app.state.vision_processor.process_frame(frame)
+                    is_special_mode = app.state.active_mode != 0
+                    state = await loop.run_in_executor(
+                        None, vision_processor.process_frame_sync, frame, is_special_mode
+                    )
+                    state.active_mode = app.state.active_mode
 
-                    # --- Drive the mouse from the gesture state ---
-                    # This is the critical call that was previously missing.
-                    if state.gesture.value != "IDLE":
-                        app.state.mouse.update(state)
+                    # --- Handle Mode Switching ---
+                    if state.mode_switch:
+                        app.state.active_mode = (app.state.active_mode + 1) % 3
+                        logger.info(f"Mode switched! Active: {app.state.active_mode}")
 
-                    # --- Annotate the frame for the live stream ---
-                    annotated_frame = app.state.vision_processor.draw_landmarks(frame, state)
+                    # --- Mode Logic ---
+                    if app.state.active_mode == 1: # CANVAS
+                        app.state.canvas.update(state.gesture.value, state.cursor_x, state.cursor_y)
+                        state.canvas_paths = app.state.canvas.paths
+                    elif app.state.active_mode == 2: # BUILDER
+                        if state.gesture == Gesture.THUMB_PINCH:
+                             app.state.builder.handle_thumb_pinch_drag(
+                                 state.cursor_x, state.cursor_y, 640, 480, # Base dims
+                                 (state.cursor_x, state.cursor_y), True
+                             )
+                        else:
+                            app.state.builder.update(
+                                state.gesture.value, state.cursor_x, state.cursor_y, 640, 480, state
+                            )
+                        state.builder_ghost = app.state.builder.ghost
+                        state.builder_world = app.state.builder.world
+                    elif app.state.active_mode == 0 and state.gesture != Gesture.IDLE:
+                        mouse.update(state)
 
-                    _, jpeg = cv2.imencode('.jpg', annotated_frame)
+                    # --- Annotate and Encode ---
+                    annotated_frame = vision_processor.draw_landmarks(frame, state)
+                    _, jpeg = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     hub_video_frame = jpeg.tobytes()
                 except Exception as e:
-                    logger.error(f"Inference error in hub camera loop: {e}")
-                    # Fallback: stream the raw frame so the feed stays alive
-                    _, frame_jpeg = cv2.imencode('.jpg', frame)
+                    logger.error(f"Hub loop error: {e}")
+                    _, frame_jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     hub_video_frame = frame_jpeg.tobytes()
-
-                await asyncio.sleep(0.033)  # ~30 fps cap
+                await asyncio.sleep(0)
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")
         finally:
@@ -273,16 +353,29 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def hub_camera_stream():
         async def frame_generator():
             global hub_video_frame
+            last_frame = None
             while hub_camera_active:
-                if hub_video_frame:
+                if hub_video_frame and hub_video_frame is not last_frame:
+                    last_frame = hub_video_frame
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + hub_video_frame + b'\r\n')
-                await asyncio.sleep(0.04) # ~25fps
+                await asyncio.sleep(0.016)  # ~60fps polling
         return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
     @app.get("/api/hub/camera/status")
     async def get_hub_camera_status():
         return JSONResponse({"active": hub_camera_active})
+
+    @app.get("/api/hub/mode")
+    async def get_hub_mode():
+        return JSONResponse({"mode": app.state.active_mode})
+
+    @app.post("/api/hub/mode")
+    async def set_hub_mode(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        mode = payload.get("mode", 0)
+        app.state.active_mode = mode % 3
+        logger.info(f"Hub mode set to {app.state.active_mode} via API")
+        return JSONResponse({"ok": True, "mode": app.state.active_mode})
 
     @app.get("/api/apps")
     async def get_apps(ip: Optional[str] = None) -> JSONResponse:
@@ -311,6 +404,22 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         shortcuts.set_bindings(new_shortcuts)
         return JSONResponse({"ok": True})
 
+    # In-memory device nickname store (persisted to settings dir)
+    _NICKNAMES_FILE = HUB_DIR / "device_nicknames.json"
+    _device_nicknames: dict = {}
+    if _NICKNAMES_FILE.exists():
+        try:
+            import json as _json
+            _device_nicknames = _json.loads(_NICKNAMES_FILE.read_text())
+        except Exception:
+            pass
+
+    def _save_nicknames():
+        try:
+            _NICKNAMES_FILE.write_text(json.dumps(_device_nicknames))
+        except Exception as e:
+            logger.error("Failed to save nicknames: %s", e)
+
     @app.post("/api/pair")
     async def initiate_pair(request: Request, payload: Annotated[dict, Body(...)]) -> JSONResponse:
         pin = payload.get("pin")
@@ -320,11 +429,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         if pin != tokens.current_pin:
             return JSONResponse({"status": "error", "error": "Invalid PIN"}, status_code=401)
 
-        # ALWAYS go through pending approval — never silently re-trust.
-        # Remove from trusted so the user always consciously approves.
-        security.trusted_ips.discard(client_ip)
+        # Auto-approve trusted IPs — no popup needed for known devices
+        if client_ip in security.trusted_ips:
+            token = tokens.generate_token(client_ip)
+            logger.info("Auto-approved trusted device %s (%s)", client_ip, hostname)
+            return JSONResponse({"status": "approved", "token": token})
+
+        # New/unknown device — go through pending approval popup
         req_id = security.add_pending_request(client_ip, hostname)
-        logger.info("Pair request from %s (%s) → pending ID %s", client_ip, hostname, req_id)
+        logger.info("Pair request from %s (%s) -> pending ID %s", client_ip, hostname, req_id)
         return JSONResponse({"status": "pending", "request_id": req_id})
 
     @app.get("/api/pair/status/{request_id}")
@@ -390,6 +503,20 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             security.blocked_ips.add(ip)
             security.trusted_ips.discard(ip)
         security.save()
+        return JSONResponse({"ok": True})
+
+    @app.get("/api/devices/nicknames")
+    async def get_nicknames() -> JSONResponse:
+        return JSONResponse({"nicknames": _device_nicknames})
+
+    @app.post("/api/devices/rename")
+    async def rename_device(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        ip = payload.get("ip")
+        name = payload.get("name", "").strip()
+        if not ip or not name:
+            return JSONResponse({"ok": False, "error": "ip and name required"}, status_code=400)
+        _device_nicknames[ip] = name
+        _save_nicknames()
         return JSONResponse({"ok": True})
 
     @app.get("/api/settings")
@@ -601,28 +728,6 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             tokens.reset_pin()
             logger.info("Background PIN rotation triggered.")
 
-    @app.on_event("startup")
-    async def startup():
-        _load_settings()
-        discovery.start()
-        lan_ip = detect_lan_ip()
-        proto = "https" if CERT_PEM.exists() else "http"
-        print("\n" + "="*50)
-        print("STARTING GESTURELINK HUB...")
-        print(f"  * Local Dashboard:  {proto}://localhost:{port}/hub")
-        print(f"  * Mobile Access:    {proto}://{lan_ip}:{port}")
-        print(f"  * Pairing PIN:      {tokens.current_pin}")
-        print("="*50 + "\n")
-        logger.info("Hub Started successfully.")
-        # Store in app state or a variable in the closure to prevent GC
-        app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
-
-    @app.on_event("shutdown")
-    def shutdown():
-        discovery.stop()
-        vision_worker.stop()
-        logger.info("Hub shutting down...")
-
     return app
 
 def run():
@@ -645,6 +750,10 @@ def run():
     ssl = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)} if cert.exists() else {}
     
     app = build_app(args.host, args.port)
+    
+    # Apply filter to uvicorn access logs to prevent console spam
+    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+    
     uvicorn.run(app, host=args.host, port=args.port, **ssl)
 
 if __name__ == "__main__":

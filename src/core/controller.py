@@ -54,6 +54,7 @@ class MouseController:
         self._left_click_cooldown:  int = 0
         self._right_click_cooldown: int = 0
         self._scroll_cooldown:      int = 0
+        self._move_lockout:         int = 0  # frames to block clicks after THUMB_MOVE
 
         self._drag_state:      _DragState = _DragState.IDLE
         self._drag_hold_count: int        = 0
@@ -64,8 +65,8 @@ class MouseController:
         self._shortcut_hold_frames = self.sc.hold_frames
         self._shortcut_cooldown = 0
         self._shortcut_counts = {
-            Gesture.THREE_FINGERS: 0,
-            Gesture.FOUR_FINGERS: 0,
+            Gesture.SCROLL: 0,
+            # (other shortcuts if needed)
         }
         self._shortcut_triggered = False
         self._shortcut_start_pos: tuple[float, float] | None = None
@@ -84,30 +85,32 @@ class MouseController:
         if self._right_click_cooldown > 0: self._right_click_cooldown -= 1
         if self._scroll_cooldown      > 0: self._scroll_cooldown      -= 1
         if self._shortcut_cooldown    > 0: self._shortcut_cooldown    -= 1
+        if self._move_lockout         > 0: self._move_lockout         -= 1
 
         sx, sy = self._map_to_screen(state.cursor_x, state.cursor_y)
 
-        # 1. Thumb-based gestures (Fast Path)
-        if state.gesture in (Gesture.THUMB_MOVE, Gesture.THUMB_CLICK, Gesture.THUMB_RCLICK):
-            return self._handle_thumb_action(state, sx, sy)
+        # 1. Index-based gestures (Restored)
+        if state.gesture in (Gesture.INDEX_MOVE, Gesture.LEFT_CLICK, Gesture.RIGHT_CLICK):
+            return self._handle_cursor_action(state, sx, sy)
 
         # 2. Multi-finger stabilized gestures (Shortcuts/Scroll)
         return self._handle_stabilized_action(state, sx, sy)
 
-    def _handle_thumb_action(self, state: GestureState, sx: float, sy: float) -> str:
-        if state.gesture == Gesture.THUMB_MOVE:
+    def _handle_cursor_action(self, state: GestureState, sx: float, sy: float) -> str:
+        if state.gesture == Gesture.INDEX_MOVE:
             self._handle_move(sx, sy)
             self._reset_drag()
             status = "MOVE"
-        elif state.gesture == Gesture.THUMB_CLICK:
+        elif state.gesture == Gesture.LEFT_CLICK:
             self._handle_move(sx, sy)
             if self._drag_state != _DragState.DRAGGING and self._left_click_cooldown == 0:
                 pyautogui.mouseDown(button="left", _pause=False)
                 self._drag_state = _DragState.DRAGGING
                 self._drag_release_grace = 0
             status = "DRAGGING"
-        elif state.gesture == Gesture.THUMB_RCLICK:
-            self._handle_move(sx, sy)
+        elif state.gesture == Gesture.RIGHT_CLICK:
+            # Rock sign → right click
+            self._reset_drag()
             if self._right_click_cooldown == 0:
                 pyautogui.click(button="right", _pause=False)
                 self._right_click_cooldown = self.gc.pinch_cooldown_frames
@@ -122,14 +125,11 @@ class MouseController:
     def _handle_stabilized_action(self, state: GestureState, sx: float, sy: float) -> str:
         status = "IDLE"
         if state.gesture == Gesture.SCROLL:
-            self._shortcut_counts[Gesture.FOUR_FINGERS] += 1
-            if self._shortcut_counts[Gesture.FOUR_FINGERS] > 3:
+            self._shortcut_counts[Gesture.SCROLL] += 1
+            if self._shortcut_counts[Gesture.SCROLL] > 3:
                 status = self._handle_scroll(state.scroll_dy)
             else:
                 status = "STABILIZING SCROLL"
-        elif state.gesture in (Gesture.THREE_FINGERS, Gesture.FOUR_FINGERS):
-            self._handle_move(sx, sy)
-            status = self._handle_shortcuts(state)
         else:
             self._reset_drag()
             self._reset_shortcut_state()
@@ -228,19 +228,7 @@ class MouseController:
         if self._shortcut_counts[current] < self._shortcut_hold_frames:
             return "SHORTCUT READY"
 
-        self._shortcut_triggered = True
-        self._shortcut_cooldown = self.sc.cooldown_frames
-
-        slot = {
-            Gesture.THREE_FINGERS: "three_fingers",
-            Gesture.FOUR_FINGERS: "four_fingers",
-        }[current]
-
-        if not self.shortcuts:
-            return "SHORTCUT NO MANAGER"
-
-        result = self.shortcuts.trigger(slot)
-        return f"SHORTCUT {slot}: {result}"
+        return "SHORTCUT TRIGGERED"
 
     def _reset_shortcut_state(self) -> None:
         for key in self._shortcut_counts:

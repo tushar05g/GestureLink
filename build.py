@@ -184,6 +184,38 @@ def copy_to_release(paths: list[Path]):
     success(f"Release files ready in: {release_dir}")
 
 
+# ─── Step 6: Create Installer ──────────────────────────────────────────────────
+def build_installer():
+    inno_script = ROOT / "installer" / "gesturelink.iss"
+    if not inno_script.exists():
+        warn("Inno Setup script not found in installer/gesturelink.iss")
+        return
+
+    iscc_paths = [
+        r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        r"C:\Program Files\Inno Setup 6\ISCC.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"),
+        shutil.which("ISCC.exe")
+    ]
+
+    iscc_exe = None
+    for p in iscc_paths:
+        if p and Path(p).exists():
+            iscc_exe = p
+            break
+
+    if not iscc_exe:
+        warn("Inno Setup Compiler (ISCC.exe) not found. Skipping installer generation.")
+        return
+
+    log("Building Inno Setup Installer...")
+    try:
+        subprocess.run([iscc_exe, str(inno_script)], check=True)
+        success("Installer built successfully in release/ folder.")
+    except subprocess.CalledProcessError as e:
+        error(f"Failed to build installer: {e}")
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
@@ -225,6 +257,7 @@ def main():
 
     if built_files:
         copy_to_release(built_files)
+        build_installer()
 
     print(f"\n{GREEN}{'='*50}")
     print(" BUILD COMPLETE!")

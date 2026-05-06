@@ -11,6 +11,7 @@ Before building, ensure the following are installed:
 |------|----------------|
 | PyInstaller | `venv\Scripts\pip install pyinstaller pillow` |
 | Node.js + npm | Download from https://nodejs.org |
+| Inno Setup 6 | Download from https://jrsoftware.org/isdl.php |
 
 ---
 
@@ -36,6 +37,7 @@ The build script will:
 3. Convert `logo.png` → `logo.ico` automatically
 4. Run PyInstaller for Hub and Agent
 5. Copy the final `.exe` files to the `release/` folder
+6. Generate Inno Setup installer (`GestureLink_Installer.exe`) in `release/`
 
 ---
 

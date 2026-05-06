@@ -26,13 +26,21 @@ camera_task = None
 vision = None
 mouse = None
 
-def _detect_lan_ip():
+def _detect_lan_ips() -> list[str]:
+    found = set()
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
+            found.add(s.getsockname()[0])
+    except OSError: pass
+    try:
+        ips = socket.gethostbyname_ex(socket.gethostname())[2]
+        for ip in ips:
+            if not ip.startswith("127."): found.add(ip)
+    except: pass
+    # Prioritize LAN ranges
+    lan = [ip for ip in found if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.")]
+    return sorted(list(lan if lan else found)) if found else ["127.0.0.1"]
 
 @app.get("/api/ping")
 async def ping():
@@ -53,9 +61,12 @@ async def _camera_loop():
             await asyncio.sleep(0.01)
             continue
         
-        # Process frame
-        state = await vision.process_frame(frame)
-        mouse.update(state)
+        # Process frame via AsyncVisionWorker
+        # Returns tuple: (GestureState, annotated_bytes) or None
+        result = await vision.process_frame(frame)
+        if result:
+            state, _ = result
+            mouse.update(state)
         
         # Small sleep to yield to event loop
         await asyncio.sleep(0.01)
@@ -160,16 +171,16 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
 
 @app.on_event("startup")
 async def startup():
-    # Broadcast presence in a non-blocking way
+    # Broadcast presence on all available LAN interfaces
     def register():
         try:
-            ip = _detect_lan_ip()
+            ips = _detect_lan_ips()
             hostname = socket.gethostname()
             _zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
             info = ServiceInfo(
                 "_gesturelink._tcp.local.",
                 f"GestureLink-Agent-{hostname}._gesturelink._tcp.local.",
-                addresses=[socket.inet_aton(ip)],
+                addresses=[socket.inet_aton(ip) for ip in ips],
                 port=8001, # Default to 8001 to avoid Hub conflict
                 properties={"type": "agent", "version": "1.0.0"},
                 server=f"{hostname}.local.",
@@ -177,7 +188,7 @@ async def startup():
             _zeroconf.register_service(info)
             app.state.zc = _zeroconf
             app.state.zc_info = info
-            logging.info(f"Agent broadcasting on {ip}:8001")
+            logging.info(f"Agent broadcasting on {ips}:8001")
         except Exception as e:
             logging.warning(f"Zeroconf failed: {e}")
 
