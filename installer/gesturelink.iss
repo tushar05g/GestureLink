@@ -47,5 +47,5 @@ Name: "{autodesktop}\GestureLink Hub"; Filename: "{app}\GestureLink_Hub.exe"; Ta
 Name: "{autodesktop}\GestureLink Agent"; Filename: "{app}\GestureLink_Agent.exe"; Tasks: desktopicon; Components: agent
 
 [Run]
-Filename: "{app}\GestureLink_Hub.exe"; Description: "Launch GestureLink Hub"; Flags: nowait postinstall skipifsilent; Components: hub
-Filename: "{app}\GestureLink_Agent.exe"; Description: "Launch GestureLink Agent"; Flags: nowait postinstall skipifsilent unchecked; Components: agent
+Filename: "{app}\GestureLink_Hub.exe"; Description: "Launch GestureLink Hub"; Flags: nowait postinstall skipifsilent shellexec; Components: hub
+Filename: "{app}\GestureLink_Agent.exe"; Description: "Launch GestureLink Agent"; Flags: nowait postinstall skipifsilent unchecked shellexec; Components: agent
