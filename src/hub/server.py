@@ -95,6 +95,38 @@ def _load_settings() -> None:
             logger.error("Failed to load settings: %s", e)
 
 def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
+    def _open_dashboard():
+        import webbrowser, subprocess, os, time
+        time.sleep(1.5)  # Wait for server to start
+        proto = "https" if CERT_PEM.exists() else "http"
+        url = f"{proto}://localhost:{port}/hub"
+        
+        # Try to open as a Chrome "App" for a desktop feel (Issue #3)
+        chrome_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+        ]
+        for path in chrome_paths:
+            if os.path.exists(path):
+                try:
+                    subprocess.Popen([path, f"--app={url}"])
+                    return
+                except Exception: pass
+        
+        # Try Edge app mode
+        edge_paths = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        ]
+        for path in edge_paths:
+            if os.path.exists(path):
+                try:
+                    subprocess.Popen([path, f"--app={url}"])
+                    return
+                except Exception: pass
+                
+        # Fallback to default browser
+        webbrowser.open(url)
+
     # --- LIFESPAN HANDLER (Startup/Shutdown) ---
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -112,6 +144,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         logger.info("Hub Started successfully.")
         
         # Background tasks
+        import threading
+        threading.Thread(target=_open_dashboard, daemon=True).start()
+        
         app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
         app.state.cleanup_task = asyncio.create_task(_cleanup_signals_loop())
         
@@ -157,6 +192,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     
     # Shared state — track live WebSocket sessions for the dashboard
     connected_clients: Dict[str, dict] = {}
+    active_hub_dashboards = 0
 
     # WebRTC Signaling Hub with Timestamp tracking for cleanup
     signals: Dict[str, dict] = {} # {id: {"q": Queue, "last_poll": timestamp}}
@@ -600,7 +636,11 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         # LOCAL HUB LOGIC — register as connected
         logger.info("LOCAL PATH: client=%s entering local hub control loop", client_ip)
-        import time
+        import time, os
+        nonlocal active_hub_dashboards
+        if token == "hub_internal":
+            active_hub_dashboards += 1
+            
         connected_clients[client_ip] = {
             "ip": client_ip,
             "connected_at": int(time.time()),
@@ -627,6 +667,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         finally:
             connected_clients.pop(client_ip, None)
             logger.info("Client disconnected: %s", client_ip)
+            if token == "hub_internal":
+                active_hub_dashboards -= 1
+                async def check_shutdown():
+                    await asyncio.sleep(1.5)
+                    if active_hub_dashboards <= 0:
+                        logger.info("Local dashboard closed. Shutting down Hub...")
+                        os._exit(0)
+                asyncio.create_task(check_shutdown())
 
     async def _handle_vision_frame(ws, frame_bytes, vision, mouse):
         # AsyncVisionWorker handles the queue and process management
