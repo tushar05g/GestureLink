@@ -36,20 +36,20 @@ class GestureConfig(BaseModel):
     # --- Cursor mode — thumb-based gestures ---
     # Thumb extension: tip far from index MCP = thumb is out
     thumb_extend_threshold: float = Field(
-        0.1, description="Min thumb-tip to index-MCP dist for thumb-pointing gesture."
+        0.07, description="Min thumb-tip to index-MCP dist for thumb-pointing gesture."
     )
     # Thumb+Index touch = left click
     thumb_index_click: float = Field(
-        0.03, description="Max thumb-index tip dist for left click."
+        0.1, description="Max thumb-index tip dist for left click."
     )
     # Thumb+Middle touch = right click
     thumb_middle_click: float = Field(
-        0.03, description="Max thumb-middle tip dist for right click."
+        0.1, description="Max thumb-middle tip dist for right click."
     )
 
     # --- Pinch / Click (kept for builder thumb-pinch move) ---
     pinch_threshold: float = Field(
-        0.045,
+        0.1,
         description=(
             "Normalised thumb-index distance to trigger a click (0.0–1.0). "
             "Hair-trigger: 0.045. Relaxed: 0.06."

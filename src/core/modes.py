@@ -12,14 +12,76 @@ from typing import Optional
 
 import numpy as np
 
-from world import Cube, CubeWorld
-
 logger = logging.getLogger(__name__)
+
+try:
+    from world import Cube, CubeWorld
+    HAS_BUILDER = True
+except ImportError:
+    try:
+        from .world import Cube, CubeWorld
+        HAS_BUILDER = True
+    except ImportError:
+        Cube = None
+        CubeWorld = None
+        HAS_BUILDER = False
+        logger.warning("Builder Mode 'world' module not found. 3D Builder will be disabled.")
+
 
 
 class AppMode(Enum):
     PRODUCTIVITY = auto()
+    CANVAS       = auto()
     BUILDER      = auto()
+
+
+class CanvasController:
+    """
+    2D Whiteboard logic:
+      - Tracks "paths" (list of points)
+      - Index+Middle pinch → Draw
+      - Scroll → Erase nearest path
+      - Rock sign → Undo
+    """
+    def __init__(self, cfg) -> None:
+        self.paths: list[list[tuple[float, float, tuple[int,int,int]]]] = []
+        self._current_path: list[tuple[float, float, tuple[int,int,int]]] = []
+        self._last_point: Optional[tuple[float, float]] = None
+        self._undo_stack: list[list] = []
+        self.brush_size = 5
+        self.active_color = (0, 255, 149) # Neon Green
+
+    def update(self, gesture: str, nx: float, ny: float) -> str:
+        status = "CANVAS"
+        
+        if gesture == "PINCH":
+            # Drawing
+            point = (nx, ny, self.active_color)
+            if not self._current_path:
+                self._current_path = [point]
+            else:
+                self._current_path.append(point)
+            status = "DRAWING"
+        else:
+            # Lifted pen
+            if self._current_path:
+                self.paths.append(self._current_path)
+                self._current_path = []
+            
+            if gesture == "SCROLL":
+                if self.paths:
+                    self.paths.pop() # Simple erase for now
+                    status = "ERASING"
+            elif gesture == "RIGHT_CLICK":
+                if self.paths:
+                    self.paths.pop()
+                    status = "UNDO"
+        
+        return status
+
+    def clear(self):
+        self.paths = []
+        self._current_path = []
 
 
 class BuilderController:
@@ -34,7 +96,10 @@ class BuilderController:
     def __init__(self, cfg) -> None:
         self.cfg   = cfg
         self.cc    = cfg.cube
-        self.world = CubeWorld(max_undo=cfg.cube.max_undo)
+        if HAS_BUILDER and CubeWorld:
+            self.world = CubeWorld(max_undo=cfg.cube.max_undo)
+        else:
+            self.world = None
 
         self.current_layer: int = 3
         self.move_mode: str = "group"
@@ -131,7 +196,7 @@ class BuilderController:
             self._ghost = (int(gx), int(gy), gz)
             if self._paint_hold >= self.cc.paint_hold_frames:
                 self._painting = True
-            if self._painting:
+            if self._painting and self.world:
                 pos = (int(gx), int(gy), gz)
                 if pos != self._last_painted:
                     self.world.place(*pos)
@@ -144,15 +209,16 @@ class BuilderController:
             self._stop_drag()
             eg = (int(gx), int(gy), gz)
             self._erase_ghost = eg
-            cube = self.world.nearest_at_xy(int(gx), int(gy))
-            if cube:
-                self.world.erase(cube.gx, cube.gy, cube.gz)
+            if self.world:
+                cube = self.world.nearest_at_xy(int(gx), int(gy))
+                if cube:
+                    self.world.erase(cube.gx, cube.gy, cube.gz)
             status = "ERASING"
 
         elif gesture == "RIGHT_CLICK":
             self._painting   = False
             self._paint_hold = 0
-            if self.world.undo():
+            if self.world and self.world.undo():
                 status = "UNDO"
 
         else:
@@ -186,8 +252,8 @@ class BuilderController:
             spy = int(drag_start_norm[1] * frame_h)
             sgx = max(0, (spx - gz * ox) // gs)
             sgy = max(0, (spy + gz * oy) // gs)
-            start_cube = self.world.nearest_at_xy(int(sgx), int(sgy))
-            if start_cube:
+            start_cube = self.world.nearest_at_xy(int(sgx), int(sgy)) if self.world else None
+            if start_cube and self.world:
                 if self.move_mode == "group":
                     self._drag_group = self.world.connected_group(start_cube)
                 else:
@@ -200,11 +266,11 @@ class BuilderController:
             ogx, ogy, ogz = self._drag_origin_grid
             dgx = int(gx) - ogx
             dgy = int(gy) - ogy
-            if dgx != 0 or dgy != 0:
+            if (dgx != 0 or dgy != 0) and self.world:
                 moved = self.world.move_group(self._drag_group, dgx, dgy, 0)
                 if moved:
                     self._drag_origin_grid = (int(gx), int(gy), ogz)
-                    if self._drag_group:
+                    if self._drag_group and self.world:
                         ref     = self._drag_group[0]
                         new_ref = Cube(ref.gx + dgx, ref.gy + dgy, ref.gz)
                         self._drag_group = self.world.connected_group(new_ref)
@@ -266,7 +332,8 @@ class BuilderController:
         self._dragging         = False
         self._drag_group       = []
         self._drag_origin_grid = None
-        self.world.selected_group = []
+        if self.world:
+            self.world.selected_group = []
 
     def _hit_toggle(self, px: int, py: int) -> bool:
         cc = self.cc

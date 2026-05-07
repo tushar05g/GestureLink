@@ -4,24 +4,25 @@ vision.py — MediaPipe hand tracking, gesture classification, two-hand support.
 Gestures
 --------
 Cursor Mode (single hand):
-  THUMB_MOVE    : Thumb extended, others down       -> move cursor
-  THUMB_CLICK   : Thumb tip + Index tip touch       -> left click
-  THUMB_RCLICK  : Thumb tip + Middle tip touch      -> right click
-  SCROLL        : 3 fingertips raised               -> scroll
-  MODE_SWITCH   : Pinky only, hold                  -> switch mode
+  THUMB_MOVE    : Thumb out, all other fingers CURLED  -> move cursor
+  THUMB_CLICK   : Thumb tip + Index tip pinch touch    -> left click
+  ROCK_RCLICK   : Index + Pinky raised (rock sign)     -> right click
+  SCROLL        : All 4 fingers raised, no thumb       -> scroll up/down
+  THREE_FINGERS : Index + Middle + Ring raised          -> shortcut
+  MODE_SWITCH   : Pinky ONLY raised, hold 20 frames    -> switch mode
 
-Builder Mode (single hand):
-  POINTING      : Index only                        -> ghost preview
-  PINCH         : Index + Middle up + drag          -> paint cubes
-  THUMB_PINCH   : Thumb + Index touch               -> move cube/group
-  SCROLL        : 3 fingertips                      -> erase
-  RIGHT_CLICK   : Rock sign                         -> undo
-  MODE_SWITCH   : Pinky hold                        -> switch mode
+Builder Mode (single hand) — UNCHANGED:
+  POINTING      : Index only                           -> ghost preview
+  PINCH         : Index + Middle up + drag             -> paint cubes
+  THUMB_PINCH   : Thumb + Index touch                  -> move cube/group
+  SCROLL        : 3 fingertips                         -> erase
+  RIGHT_CLICK   : Rock sign                            -> undo
+  MODE_SWITCH   : Pinky hold                           -> switch mode
 
 Builder Mode (two hands):
-  Left fist + Right index sweep  -> rotate
-  Left fist + Right thumb+index close -> zoom out
-  Left fist + Right thumb+index open  -> zoom in
+  Left fist + Right index sweep      -> rotate
+  Left fist + Right thumb+index open -> zoom in
+  Left fist + Right thumb+index close-> zoom out
 """
 from __future__ import annotations
 
@@ -69,21 +70,21 @@ def _ensure_model() -> str:
 # ---------------------------------------------------------------------------
 class Gesture(str, Enum):
     IDLE          = "IDLE"
-    # Cursor mode
-    THUMB_MOVE    = "THUMB_MOVE"    # thumb extended → move cursor
-    THUMB_CLICK   = "THUMB_CLICK"   # thumb + index touch → left click
-    THUMB_RCLICK  = "THUMB_RCLICK"  # thumb + middle touch → right click
-    ONE_FINGER    = "ONE_FINGER"    # index finger up
-    TWO_FINGERS   = "TWO_FINGERS"   # index + middle up
-    THREE_FINGERS = "THREE_FINGERS" # index + middle + ring up
-    FOUR_FINGERS  = "FOUR_FINGERS"  # index + middle + ring + pinky up
+    # --- Cursor mode (Restored Index-based) ---
+    INDEX_MOVE    = "INDEX_MOVE"    # index only → move cursor
+    LEFT_CLICK    = "LEFT_CLICK"    # index + middle → left click/drag
+    RIGHT_CLICK   = "RIGHT_CLICK"   # rock sign → right click
     # Shared / Builder
     POINTING      = "POINTING"      # index only → ghost preview
-    PINCH         = "PINCH"         # index + middle → paint
+    PINCH         = "PINCH"         # index+middle → paint
     THUMB_PINCH   = "THUMB_PINCH"   # thumb + index touch → move cube
-    RIGHT_CLICK   = "RIGHT_CLICK"   # rock sign → undo in builder / right click productivity
     SCROLL        = "SCROLL"        # 3 fingertips
     MODE_SWITCH   = "MODE_SWITCH"   # pinky hold
+    # --- Legacy aliases (kept for controller compatibility) ---
+    ONE_FINGER    = "ONE_FINGER"
+    TWO_FINGERS   = "TWO_FINGERS"
+    THREE_FINGERS = "THREE_FINGERS"
+    FOUR_FINGERS  = "FOUR_FINGERS"
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,10 @@ class GestureState:
     pinch_active:       bool    = False   # index+middle (paint)
     thumb_pinch_active: bool    = False   # thumb+index (move)
     mode_switch:        bool    = False
+    # Mode info: 0=Cursor, 1=Canvas, 2=Builder
+    active_mode:        int     = 0
+    # For Canvas Mode rendering
+    canvas_paths:       list    = field(default_factory=list)
 
     # Two-hand state (Builder only)
     left_fist:          bool    = False   # left hand making fist
@@ -148,98 +153,40 @@ def _is_fist(lm, threshold: float = 0.06) -> bool:
 class GestureClassifier:
     def __init__(self, cfg) -> None:
         self.gc = cfg.gesture
-        self.last_gesture = Gesture.IDLE
-        self.gesture_count = 0
-        self.MIN_FRAMES = 2 # minimum frames to hold a gesture
-        
-        # Velocity Tracking
-        self._prev_dist_ti = 1.0
-        self._prev_dist_tm = 1.0
-        self._click_cooldown = 0
-
-    def _get_palm_size(self, lm) -> float:
-        # Distance between wrist (0) and middle finger MCP (9)
-        return _dist(lm[0], lm[9])
 
     def classify_cursor(self, lm) -> tuple[Gesture, float, float]:
-        """Classify gestures for Cursor (Productivity) mode."""
+        """Classify gestures for Cursor (Productivity) mode — Index Based."""
         gc = self.gc
-        palm_size = self._get_palm_size(lm)
-        if palm_size < 0.01: palm_size = 0.1 # avoid div zero
 
         index_ext  = _finger_extended(lm, 8,  6)
         middle_ext = _finger_extended(lm, 12, 10)
         ring_ext   = _finger_extended(lm, 16, 14)
         pinky_ext  = _finger_extended(lm, 20, 18)
 
-        # Normalize thresholds by palm size
-        click_thresh  = gc.thumb_index_click * (palm_size / 0.1)
-        rclick_thresh = gc.thumb_middle_click * (palm_size / 0.1)
-        move_thresh   = gc.thumb_extend_threshold * (palm_size / 0.1)
+        # Index tip position as cursor anchor
+        cx, cy = lm[8].x, lm[8].y
 
-        thumb_index_dist  = _dist(lm[4], lm[8])
-        thumb_middle_dist = _dist(lm[4], lm[12])
+        # Priority 1: Right click — rock sign (index + pinky)
+        if index_ext and pinky_ext and not middle_ext and not ring_ext:
+            return Gesture.RIGHT_CLICK, cx, cy
 
-        # Velocity Check: positive if closing
-        vel_ti = self._prev_dist_ti - thumb_index_dist
-        vel_tm = self._prev_dist_tm - thumb_middle_dist
-        self._prev_dist_ti = thumb_index_dist
-        self._prev_dist_tm = thumb_middle_dist
+        # Priority 2: Scroll — 3 fingertips raised
+        index_tip_up  = _fingertip_raised(lm, 8,  5)
+        middle_tip_up = _fingertip_raised(lm, 12, 9)
+        ring_tip_up   = _fingertip_raised(lm, 16, 13)
+        if index_tip_up and middle_tip_up and ring_tip_up and not pinky_ext:
+            scroll_y = (lm[8].y + lm[12].y + lm[16].y) / 3.0
+            return Gesture.SCROLL, cx, scroll_y
 
-        # Default anchor
-        cx, cy = lm[4].x, lm[4].y
-        raw_gesture = Gesture.IDLE
+        # Priority 3: Left click / drag — index + middle up (V-sign)
+        if index_ext and middle_ext and not ring_ext and not pinky_ext:
+            return Gesture.LEFT_CLICK, cx, cy
 
-        # --- Priority Decision Tree ---
+        # Priority 4: Move cursor — index only (strictly raised)
+        if index_tip_up and not middle_tip_up and not ring_tip_up and not pinky_ext:
+            return Gesture.INDEX_MOVE, cx, cy
 
-        # 0. Mode switch (Pinky hold)
-        if pinky_ext and not index_ext and not middle_ext and not ring_ext:
-            raw_gesture = Gesture.MODE_SWITCH
-
-        # 1. Multi-finger Scroll (4 fingers up)
-        elif index_ext and middle_ext and ring_ext and pinky_ext:
-            raw_gesture = Gesture.SCROLL
-            cy = (lm[8].y + lm[12].y + lm[16].y + lm[20].y) / 4.0
-
-        # 2. Shortcuts (1, 2, 3 fingers)
-        elif index_ext and middle_ext and ring_ext and not pinky_ext:
-            raw_gesture = Gesture.THREE_FINGERS
-            cx, cy = (lm[8].x + lm[12].x + lm[16].x) / 3.0, (lm[8].y + lm[12].y + lm[16].y) / 3.0
-        
-        elif index_ext and middle_ext and not ring_ext:
-            raw_gesture = Gesture.TWO_FINGERS
-            cx, cy = (lm[8].x + lm[12].x) / 2.0, (lm[8].y + lm[12].y) / 2.0
-
-        elif index_ext and not middle_ext and not ring_ext:
-            raw_gesture = Gesture.ONE_FINGER
-            cx, cy = lm[8].x, lm[8].y
-
-        # 3. Thumb-based Clicks (Velocity-aware)
-        elif thumb_index_dist < click_thresh:
-            if vel_ti > 0.005 or thumb_index_dist < (click_thresh * 0.7):
-                raw_gesture = Gesture.THUMB_CLICK
-        
-        elif thumb_middle_dist < rclick_thresh:
-            if vel_tm > 0.005 or thumb_middle_dist < (rclick_thresh * 0.7):
-                raw_gesture = Gesture.THUMB_RCLICK
-
-        # 4. Standard Move (Thumb extended)
-        else:
-            thumb_mcp_dist = _dist(lm[4], lm[5])
-            if thumb_mcp_dist > move_thresh:
-                raw_gesture = Gesture.THUMB_MOVE
-
-        # --- Hysteresis / Stability ---
-        if raw_gesture == self.last_gesture:
-            self.gesture_count += 1
-        else:
-            if self.gesture_count < self.MIN_FRAMES:
-                raw_gesture = self.last_gesture
-            else:
-                self.last_gesture = raw_gesture
-                self.gesture_count = 0
-
-        return raw_gesture, cx, cy
+        return Gesture.IDLE, cx, cy
 
     def classify_builder(self, lm) -> tuple[Gesture, float, float]:
         """Classify gestures for Builder mode (single hand)."""
@@ -256,14 +203,8 @@ class GestureClassifier:
 
         thumb_index_dist = _dist(lm[4], lm[8])
 
-        cx = lm[8].x
-        cy = lm[8].y
+        cx, cy = lm[8].x, lm[8].y
 
-        # Priority 0: Mode switch — pinky only
-        if pinky_ext and not index_ext and not middle_ext and not ring_ext:
-            return Gesture.MODE_SWITCH, cx, cy
-
-        # Priority 1: Thumb pinch (move cube) — thumb + index touch
         if thumb_index_dist < gc.pinch_threshold:
             return Gesture.THUMB_PINCH, cx, cy
 
@@ -286,6 +227,40 @@ class GestureClassifier:
 
         return Gesture.IDLE, cx, cy
 
+
+# ---------------------------------------------------------------------------
+# Drawing Helpers (Isometric)
+# ---------------------------------------------------------------------------
+
+def _cube_origin(gx, gy, gz, gs, ox, oy):
+    return int(gx*gs + gz*ox), int(gy*gs - gz*oy)
+
+def _draw_iso_cube(frame, px, py, gs, color_bgr, alpha=1.0, outline=False, outline_color=(0,255,255)):
+    h = gs // 2
+    b, g, r = color_bgr
+
+    def shade(f):
+        return (int(min(255,b*f)), int(min(255,g*f)), int(min(255,r*f)))
+
+    top   = np.array([[px+gs//2,py],[px+gs,py+h],[px+gs//2,py+gs//2+h//2],[px,py+h]], np.int32)
+    left  = np.array([[px,py+h],[px+gs//2,py+gs//2+h//2],[px+gs//2,py+gs],[px,py+gs-h//2]], np.int32)
+    right = np.array([[px+gs//2,py+gs//2+h//2],[px+gs,py+h],[px+gs,py+gs-h//2],[px+gs//2,py+gs]], np.int32)
+
+    if alpha < 1.0:
+        ov = frame.copy()
+        cv2.fillPoly(ov, [top],   shade(1.4))
+        cv2.fillPoly(ov, [left],  shade(1.0))
+        cv2.fillPoly(ov, [right], shade(0.6))
+        cv2.addWeighted(ov, alpha, frame, 1-alpha, 0, frame)
+    else:
+        cv2.fillPoly(frame, [top],   shade(1.4))
+        cv2.fillPoly(frame, [left],  shade(1.0))
+        cv2.fillPoly(frame, [right], shade(0.6))
+
+    edge = outline_color if outline else shade(0.3)
+    lw   = 2 if outline else 1
+    for poly in [top, left, right]:
+        cv2.polylines(frame, [poly], True, edge, lw, cv2.LINE_AA)
 
 # ---------------------------------------------------------------------------
 # Vision Processor
@@ -355,14 +330,97 @@ class VisionProcessor:
         return await self._process(frame, builder_mode)
 
     def process_frame_sync(self, frame_input, builder_mode=False) -> GestureState:
-        """Sync version for the vision worker process. Handles bytes or numpy."""
+        """Pure-sync version safe to call from a thread-pool executor.
+        
+        Does NOT call asyncio.run() — safe when called from run_in_executor()
+        inside a running event loop.
+        """
+        import cv2
         if isinstance(frame_input, bytes):
             frame = self.decode_frame(frame_input)
         else:
             frame = frame_input
+
+        if frame is None:
+            return GestureState()
+
+        self.last_landmarks = None
+        state = GestureState()
+
+        # Local MediaPipe inference (synchronous, no cloud path)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = self._mp_image_cls(image_format=self._mp_format, data=frame_rgb)
+        result = self._landmarker.detect(mp_image)
+
+        if not result.hand_landmarks:
+            self._pinky_hold_frames = 0
+            return state
+
+        hands = result.hand_landmarks
+        handedness = result.handedness
+
+        right_lm = None
+        left_lm = None
+
+        if hands:
+            # If two hands, pick them by label first
+            for i, hand in enumerate(hands):
+                label = handedness[i][0].category_name
+                if label == "Right": right_lm = hand
+                else: left_lm = hand
             
-        if frame is None: return GestureState()
-        return asyncio.run(self._process(frame, builder_mode))
+            # If only one hand found, ALWAYS treat it as the primary controller
+            if right_lm is None and left_lm is not None:
+                right_lm = left_lm
+                left_lm = None
+
+        self.last_landmarks = right_lm
+        self.last_left_landmarks = left_lm
+
+        if left_lm:
+            state.left_fist = _is_fist(left_lm, self.cfg.opengl.fist_threshold)
+
+        if right_lm:
+            state.right_thumb_index_dist = _dist(right_lm[4], right_lm[8])
+            state.right_index_pos = (right_lm[8].x, right_lm[8].y)
+            state.landmarks = [{"x": l.x, "y": l.y} for l in right_lm]
+
+        if right_lm is None:
+            self._pinky_hold_frames = 0
+            self._prev_scroll_y = None
+            return state
+
+        lm = right_lm
+        if builder_mode:
+            gesture, raw_x, raw_y = self._classifier.classify_builder(lm)
+        else:
+            gesture, raw_x, raw_y = self._classifier.classify_cursor(lm)
+
+        if gesture == Gesture.MODE_SWITCH:
+            self._pinky_hold_frames += 1
+            if self._pinky_hold_frames == self._PINKY_HOLD_REQUIRED:
+                state.mode_switch = True
+                self._pinky_hold_frames = 0
+        else:
+            self._pinky_hold_frames = 0
+
+        cursor_x = raw_x
+        state.gesture = gesture
+        state.cursor_x = cursor_x
+        state.cursor_y = raw_y
+        state.pinch_active = gesture == Gesture.PINCH
+        state.thumb_pinch_active = gesture == Gesture.THUMB_PINCH
+        state.finger_count = (3 if gesture == Gesture.THREE_FINGERS else
+                              4 if gesture in (Gesture.FOUR_FINGERS, Gesture.SCROLL) else 0)
+
+        if gesture == Gesture.SCROLL:
+            if self._prev_scroll_y is not None:
+                state.scroll_dy = self._prev_scroll_y - raw_y
+            self._prev_scroll_y = raw_y
+        else:
+            self._prev_scroll_y = None
+
+        return state
 
     async def _process(self, frame_bgr: np.ndarray, builder_mode: bool = False) -> GestureState:
         import cv2
@@ -394,26 +452,23 @@ class VisionProcessor:
                 self._pinky_hold_frames = 0
                 return state
 
+
+        # --- Handedness Logic ---
+        # Since we flip the frame in the server, the user's Right hand 
+        # may be labeled "Left" by MediaPipe. We take the most confident hand.
         right_lm = None
         left_lm = None
 
-        for i, hand in enumerate(hands):
-            if i < len(handedness):
+        if hands:
+            for i, hand in enumerate(hands):
                 label = handedness[i][0].category_name
-                logger.info("Detected hand: %s", label)
-                if label == "Right":
-                    right_lm = hand
-                else:
-                    left_lm  = hand
-            else:
-                if right_lm is None: right_lm = hand
+                if label == "Right": right_lm = hand
                 else: left_lm = hand
-
-        # Mirroring Fallback: If only one hand is seen and it's labeled "Left", 
-        # treat it as "Right" for cursor control.
-        if right_lm is None and left_lm is not None:
-            logger.info("Mirroring fallback: Using left hand as right cursor.")
-            right_lm = left_lm
+            
+            # One-hand fallback: Always use whichever hand is visible
+            if right_lm is None and left_lm is not None:
+                right_lm = left_lm
+                left_lm = None
 
         self.last_landmarks      = right_lm
         self.last_left_landmarks = left_lm
@@ -424,13 +479,13 @@ class VisionProcessor:
             left_fist = _is_fist(left_lm, self.cfg.opengl.fist_threshold)
             state.left_fist = left_fist
 
-        # --- Right hand two-hand state ---
+        # --- Right hand data ---
         if right_lm:
             state.right_thumb_index_dist = _dist(right_lm[4], right_lm[8])
             state.right_index_pos = (right_lm[8].x, right_lm[8].y)
             state.landmarks = [{"x": l.x, "y": l.y} for l in right_lm]
 
-        # --- Classify right hand gesture ---
+        # --- Classify gesture ---
         if right_lm is None:
             self._pinky_hold_frames = 0
             self._prev_scroll_y     = None
@@ -455,15 +510,15 @@ class VisionProcessor:
         else:
             self._pinky_hold_frames = 0
 
-        # --- Always mirror X (front camera) ---
-        cursor_x = 1.0 - raw_x
+        # Use raw_x directly because frame is pre-flipped in server loop
+        cursor_x = raw_x
 
         state.gesture            = gesture
         state.cursor_x           = cursor_x
         state.cursor_y           = raw_y
         state.pinch_active       = gesture == Gesture.PINCH
         state.thumb_pinch_active = gesture == Gesture.THUMB_PINCH
-        state.finger_count       = 1 if gesture == Gesture.ONE_FINGER else 2 if gesture == Gesture.TWO_FINGERS else 3 if gesture == Gesture.THREE_FINGERS else 0
+        state.finger_count       = 3 if gesture == Gesture.THREE_FINGERS else 4 if gesture in (Gesture.FOUR_FINGERS, Gesture.SCROLL) else 0
 
         # --- Scroll delta (4 fingers only) ---
         if gesture == Gesture.SCROLL:
@@ -498,20 +553,57 @@ class VisionProcessor:
         annotated = frame.copy()
         h, w, _ = annotated.shape
 
-        # state.landmarks is a flat list[dict[str,float]] with 21 entries (one per landmark)
-        if state.landmarks:
-            for lm in state.landmarks:
-                cx = int(lm['x'] * w)
-                cy = int(lm['y'] * h)
-                cv2.circle(annotated, (cx, cy), 4, (0, 255, 149), -1)
+        # ── Draw Canvas Paths (2D mode) ─────────────────────────────────────
+        if state.active_mode == 1 and hasattr(state, 'canvas_paths'):
+            for path in state.canvas_paths:
+                if len(path) < 2: continue
+                points = np.array([ [int(p[0]*w), int(p[1]*h)] for p in path], np.int32)
+                color = path[0][2] if len(path[0]) > 2 else (0, 255, 149)
+                cv2.polylines(annotated, [points], False, color, 3, cv2.LINE_AA)
 
-        # Draw Gesture Status text
-        if state.gesture and state.gesture != Gesture.IDLE:
-            cv2.putText(annotated, f"GESTURE: {state.gesture.name}", (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 149), 2)
-        else:
-            cv2.putText(annotated, "WAITING FOR HAND...", (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (150, 150, 150), 2)
+        # ── Draw Builder Cubes (3D mode) ────────────────────────────────────
+        if state.active_mode == 2 and hasattr(state, 'builder_world') and state.builder_world:
+            cc = self.cfg.cube
+            gs, ox, oy = cc.grid_size, cc.iso_offset_x, cc.iso_offset_y
+            world = state.builder_world
+            selected_set = set(world.selected_group) if hasattr(world, 'selected_group') else set()
+
+            # Draw back→front layers
+            for gz in range(cc.num_layers-1, -1, -1):
+                color = cc.layer_colors[gz]
+                layer_cubes = sorted(
+                    [c for c in world.cubes if c.gz == gz],
+                    key=lambda c: (-c.gy, -c.gx)
+                )
+                for cube in layer_cubes:
+                    px, py = _cube_origin(cube.gx, cube.gy, cube.gz, gs, ox, oy)
+                    is_sel = cube in selected_set
+                    _draw_iso_cube(annotated, px, py, gs, color, 1.0, outline=is_sel, outline_color=cc.selected_color)
+
+            # Draw Ghost preview
+            if hasattr(state, 'builder_ghost') and state.builder_ghost:
+                px, py = _cube_origin(*state.builder_ghost, gs, ox, oy)
+                _draw_iso_cube(annotated, px, py, gs, cc.layer_colors[state.builder_ghost[2]], 0.5, True, (200,200,200))
+
+        # ── Draw Premium HUD Overlay ────────────────────────────────────────
+        active = state.gesture and state.gesture != Gesture.IDLE
+        mode_text = "[BUILDER]" if state.active_mode == 2 else "[CANVAS]" if state.active_mode == 1 else "[CURSOR]"
+        label = f"{mode_text} {state.gesture.upper()}" if active else f"{mode_text} SCANNING..."
+        color = (0, 255, 149) if active else (200, 200, 200)
+
+        # Draw semi-transparent background box
+        overlay = annotated.copy()
+        box_w = 300 if active else 220
+        cv2.rectangle(overlay, (10, 10), (box_w, 60), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, annotated, 0.4, 0, annotated)
+
+        # Draw label text
+        cv2.putText(annotated, label, (25, 45),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.8, color, 1, cv2.LINE_AA)
+        
+        # Draw small status light
+        light_color = (0, 255, 0) if active else (0, 0, 255)
+        cv2.circle(annotated, (20, 36), 4, light_color, -1)
 
         return annotated
 

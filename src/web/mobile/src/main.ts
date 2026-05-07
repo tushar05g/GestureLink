@@ -104,9 +104,32 @@ async function init() {
       if (!data.ok) throw new Error(data.error);
       if (remoteGestureStatus) remoteGestureStatus.textContent = active ? "CAMERA ON" : "CAMERA OFF";
     } catch (err) {
-      alert(`Failed to toggle PC camera: ${err}`);
+      alert(`Failed to toggle camera: ${err}`);
       pcCameraToggle.checked = !e.target.checked;
     }
+  });
+
+  // Vision Mode Buttons
+  const modeBtns = document.querySelectorAll(".mode-btn");
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mode = parseInt((btn as HTMLElement).dataset.mode || "0");
+      try {
+        const res = await fetch(`${location.origin}/api/hub/mode`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          modeBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          triggerHaptic(ImpactStyle.Medium);
+        }
+      } catch (err) {
+        console.error("Failed to set mode:", err);
+      }
+    });
   });
 
   document.getElementById("saveBtn")?.addEventListener('click', saveSettings);
@@ -187,14 +210,36 @@ function renderDeviceList() {
     const isActive = activePC?.ip === d.ip;
     return `
     <div id="device-card-${i}" style="display: flex; justify-content: space-between; align-items: center; padding: 14px; background: var(--glass); border-radius: 14px; border: 1px solid ${isActive ? 'rgba(0,255,149,0.3)' : 'var(--border)'}; transition: all 0.2s;">
-      <div>
-        <div style="font-weight: 600; font-size: 0.9rem;">${d.hostname}</div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight: 600; font-size: 0.9rem; display:flex; align-items:center; gap:6px;">
+          <span id="device-name-${i}" style="cursor:pointer; border-bottom: 1px dashed rgba(255,255,255,0.2);" onclick="globalThis.renameDevice(${i})" title="Tap to rename">${d.hostname}</span>
+          <span style="font-size:0.6rem; color:var(--text-secondary); opacity:0.5;">✏️</span>
+        </div>
         <div style="font-size: 0.7rem; color: var(--text-secondary);">${d.ip}</div>
       </div>
       <button id="connect-btn-${i}" onclick="globalThis.connectToPC(${i})" class="device-connect-btn ${isActive ? 'connected' : ''}">${isActive ? '✓ Active' : 'Connect'}</button>
     </div>`;
   }).join("");
 }
+
+// @ts-ignore
+globalThis.renameDevice = async (i: number) => {
+  const d = devices[i];
+  const newName = prompt(`Rename "${d.hostname}":`, d.hostname);
+  if (!newName || !newName.trim() || newName.trim() === d.hostname) return;
+  const trimmed = newName.trim();
+  try {
+    await fetch(`${location.origin}/api/devices/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip: d.ip, name: trimmed })
+    });
+    devices[i].hostname = trimmed;
+    renderDeviceList();
+  } catch (e) {
+    console.error('Rename failed', e);
+  }
+};
 
 // @ts-ignore
 globalThis.connectToPC = async (i: number) => {
@@ -219,9 +264,14 @@ globalThis.connectToPC = async (i: number) => {
     ws.onopen = () => {
       d.ws = ws;
       activatePC(d);
-      // Removed startVisionLoop - processing happens on PC
       initWebRTC();
-      renderDeviceList(); // re-render to show 'Active' state
+      renderDeviceList();
+    };
+
+    ws.onerror = (err) => {
+      console.error("WS Connection Error", err);
+      alert(`⚠️ Could not connect to ${d.hostname}. Ensure the Agent is running and on the same network.`);
+      renderDeviceList(); // Reset UI state
     };
 
     ws.onclose = (event) => {
@@ -303,7 +353,7 @@ async function sendSignal(data: any) {
   });
 }
 
-function activatePC(d: any) {
+async function activatePC(d: any) {
   activePC = d;
   activeDeviceName.textContent = d.hostname;
   activeDeviceIP.textContent = d.ip;
@@ -312,6 +362,26 @@ function activatePC(d: any) {
   // Bug 2: show disconnect button when connected
   document.getElementById('disconnectBtn')?.classList.add('visible');
   syncSettings();
+
+  // Initial mode and camera sync
+  try {
+    const [modeRes, camRes] = await Promise.all([
+      fetch(`${location.origin}/api/hub/mode`).then(r => r.json()),
+      fetch(`${location.origin}/api/hub/camera/status?target=${d.ip}`).then(r => r.json()).catch(() => ({ active: false }))
+    ]);
+
+    const modeBtns = document.querySelectorAll(".mode-btn");
+    modeBtns.forEach(b => {
+      if (parseInt((b as HTMLElement).dataset.mode || "0") === modeRes.mode) b.classList.add('active');
+      else b.classList.remove('active');
+    });
+
+    const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
+    if (pcCameraToggle) pcCameraToggle.checked = camRes.active;
+    const remoteGestureStatus = document.getElementById("remoteGestureStatus");
+    if (remoteGestureStatus) remoteGestureStatus.textContent = camRes.active ? "CAMERA ON" : "CAMERA OFF";
+
+  } catch (_) { }
 }
 
 async function syncSettings() {
@@ -575,20 +645,24 @@ function setupTouchpad() {
   let lastMoveTime = 0;
   let isMoving = false;
   let isDragging = false;
-  let isPinching = false;
+  let twoFingerStarted = false;  // lock state: true when 2+ fingers detected
+  let twoFingerMidY = 0;          // midpoint Y of two fingers for scroll
 
   touchZone.addEventListener('touchstart', (e: any) => {
     maxFingers = Math.max(maxFingers, e.touches.length);
     lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
     startTime = Date.now();
     isMoving = false;
-    isPinching = false;
 
     if (e.touches.length === 2) {
+      twoFingerStarted = true;  // lock: no cursor moves allowed this gesture
+      twoFingerMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       lastPinchDist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       );
+    } else if (e.touches.length === 1) {
+      twoFingerStarted = false;
     }
 
     if (e.touches.length === 1 && (startTime - lastTapTime) < 300) {
@@ -604,7 +678,43 @@ function setupTouchpad() {
     isMoving = true;
     maxFingers = Math.max(maxFingers, e.touches.length);
 
-    if (e.touches.length === 1 && !isDragging) {
+    // As soon as a second finger appears mid-gesture, lock into scroll mode
+    if (e.touches.length >= 2 && !twoFingerStarted) {
+      twoFingerStarted = true;
+      twoFingerMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+
+    if (twoFingerStarted && e.touches.length >= 2) {
+      // --- Two-Finger Zone: scroll or pinch-zoom ---
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const currentMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      const pinchDelta = currentDist - lastPinchDist;
+
+      if (Math.abs(pinchDelta) > 8) {
+        // Pinch-to-zoom when fingers spread/close significantly
+        if (activePC?.ws?.readyState === 1) {
+          activePC.ws.send(JSON.stringify({ type: 'zoom', delta: pinchDelta }));
+        }
+        lastPinchDist = currentDist;
+      } else {
+        // Two-finger scroll — always active when not pinching
+        const scrollDy = currentMidY - twoFingerMidY;
+        if (Math.abs(scrollDy) > 2 && activePC?.ws?.readyState === 1) {
+          activePC.ws.send(JSON.stringify({ type: 'scroll', dy: scrollDy * -1.5 }));
+        }
+      }
+      twoFingerMidY = currentMidY;
+      lastPinchDist = currentDist;
+
+    } else if (!twoFingerStarted && e.touches.length === 1 && !isDragging) {
+      // --- Single finger: cursor move ---
       const now = Date.now();
       if (now - lastMoveTime < 16) return;
 
@@ -616,7 +726,8 @@ function setupTouchpad() {
         activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
         lastMoveTime = now;
       }
-    } else if (e.touches.length === 1 && isDragging) {
+    } else if (!twoFingerStarted && e.touches.length === 1 && isDragging) {
+      // --- Single finger drag (left-mouse held) ---
       const dx = e.touches[0].clientX - lastX;
       const dy = e.touches[0].clientY - lastY;
       lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
@@ -650,6 +761,8 @@ function setupTouchpad() {
   }, { passive: false });
 
   touchZone.addEventListener('touchend', (e: any) => {
+    if (e.touches.length > 0) return; // Wait until the last finger is lifted to prevent double-taps
+
     const now = Date.now();
     const duration = now - startTime;
 
@@ -678,6 +791,7 @@ function setupTouchpad() {
 
     if (e.touches.length === 0) {
       maxFingers = 0;
+      twoFingerStarted = false;
     }
   });
 }

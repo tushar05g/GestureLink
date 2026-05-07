@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -31,7 +32,7 @@
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
-            background-image: 
+            background-image:
                 radial-gradient(circle at 0% 0%, rgba(0, 255, 149, 0.03) 0%, transparent 50%),
                 radial-gradient(circle at 100% 100%, rgba(0, 162, 255, 0.03) 0%, transparent 50%);
         }
@@ -82,7 +83,8 @@
             gap: 12px;
         }
 
-        .nav-item:hover, .nav-item.active {
+        .nav-item:hover,
+        .nav-item.active {
             background: var(--surface);
             color: var(--text-primary);
         }
@@ -95,28 +97,52 @@
         /* Main Content */
         main {
             margin-left: var(--sidebar-w);
-            flex: 1;
-            padding: 40px 60px;
-            max-width: 1400px;
+            width: calc(100% - var(--sidebar-w));
+            padding: 40px;
+            box-sizing: border-box;
+            min-height: 100vh;
         }
 
         .header-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 40px;
-        }
-
-        .header-row h2 {
-            font-size: 1.8rem;
-            font-weight: 700;
+            margin-bottom: 32px;
+            gap: 12px;
         }
 
         /* Grid & Cards */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
             gap: 24px;
+            width: 100%;
+        }
+
+        .grid .col-full {
+            grid-column: 1 / -1;
+        }
+
+        @media (max-width: 1200px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 900px) {
+            :root {
+                --sidebar-w: 0px;
+            }
+
+            nav.sidebar {
+                display: none;
+            }
+
+            main {
+                margin-left: 0;
+                width: 100%;
+                padding: 20px;
+            }
         }
 
         .card {
@@ -213,9 +239,20 @@
         }
 
         @keyframes pulse {
-            0% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(1.2); }
-            100% { opacity: 1; transform: scale(1); }
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.4;
+                transform: scale(1.2);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
 
         .badge {
@@ -253,7 +290,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0, 0, 0, 0.6);
             backdrop-filter: blur(4px);
             color: var(--text-secondary);
             font-size: 0.9rem;
@@ -269,21 +306,39 @@
 
         /* Modal */
         #qr-modal {
-            display:none; 
-            position:fixed; 
-            inset:0; 
-            background:rgba(0,0,0,0.85); 
-            backdrop-filter:blur(10px); 
-            z-index:1000; 
-            align-items:center; 
-            justify-content:center;
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
         }
 
-        .section { display: none; animation: fadeIn 0.3s ease-out; }
-        .section.active { display: block; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .section {
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
     </style>
 </head>
+
 <body>
     <nav class="sidebar">
         <div class="logo-wrap">
@@ -292,13 +347,19 @@
         <div class="nav-links">
             <a href="#" class="nav-item active" onclick="switchTab('overview', this)">Overview</a>
             <a href="#" class="nav-item" onclick="switchTab('devices', this)">Connected Devices</a>
+            <a href="#" class="nav-item" onclick="switchTab('guide', this)">Getting Started</a>
             <a href="#" class="nav-item" onclick="switchTab('logs', this)">System Logs</a>
             <a href="#" class="nav-item" onclick="switchTab('settings', this)">Settings</a>
         </div>
 
-        <div style="margin-top: auto; padding: 20px; background: var(--surface); border-radius: 16px; border: 1px solid var(--border);">
-            <div id="pin-display" style="font-size: 1.5rem; font-weight: 800; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 4px;">------</div>
-            <div style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700;">Active Pairing PIN</div>
+        <div id="pin-panel" style="margin-top: 24px; padding: 14px 20px; background: rgba(255, 255, 255, 0.02); border-radius: 12px; border: 1px solid var(--border); transition: all 0.3s;">
+            <div id="pin-display" style="font-size: 1.3rem; font-weight: 800; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 2px;">------</div>
+            <div style="font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700;">Pairing PIN</div>
+        </div>
+
+        <div id="mode-panel" style="margin-top: 24px; padding: 14px 20px; background: rgba(0, 255, 149, 0.05); border-radius: 12px; border: 1px solid rgba(0, 255, 149, 0.1);">
+            <div style="font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; margin-bottom: 4px;">Active Vision Mode</div>
+            <div id="active-mode-display" style="font-size: 1.1rem; font-weight: 800; color: var(--accent);">CURSOR</div>
         </div>
     </nav>
 
@@ -307,17 +368,22 @@
             <div class="header-row">
                 <div>
                     <h2>System Overview</h2>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem;">Hub Status: <span style="color: var(--accent)">● Active Monitoring</span></p>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem;">Hub Status: <span
+                            style="color: var(--accent)">● Active Monitoring</span></p>
                 </div>
-                <button onclick="document.getElementById('qr-modal').style.display='flex'" class="btn btn-primary">+ Pair Mobile</button>
+                <button onclick="document.getElementById('qr-modal').style.display='flex'" class="btn btn-primary">+
+                    Pair Mobile</button>
             </div>
 
             <div class="grid">
-                <section class="card" style="grid-column: span 2;">
-                    <h3><div class="status-dot active"></div> Live Gesture Stream</h3>
+                <section class="card col-full">
+                    <h3>
+                        <div class="status-dot active"></div> Live Gesture Stream
+                    </h3>
                     <div class="video-container">
                         <video id="webrtc-video" autoplay playsinline style="display:none;"></video>
-                        <img id="hub-stream-img" style="width:100%; height:100%; object-fit:cover; display:none;" src="">
+                        <img id="hub-stream-img" style="width:100%; height:100%; object-fit:cover; display:none;"
+                            src="">
                         <div id="video-placeholder" class="video-placeholder">
                             Waiting for Camera or Remote Stream...
                         </div>
@@ -341,7 +407,9 @@
         </section>
 
         <section id="devices" class="section">
-            <div class="header-row"><h2>Connected Devices <span id="connected-count" class="badge">0</span></h2></div>
+            <div class="header-row">
+                <h2>Connected Devices <span id="connected-count" class="badge">0</span></h2>
+            </div>
             <div class="card">
                 <div id="connected-list">
                     <div class="empty-state">No devices currently active. Pair a phone to begin.</div>
@@ -349,20 +417,142 @@
             </div>
         </section>
 
+        <!-- GETTING STARTED GUIDE -->
+        <section id="guide" class="section">
+            <div class="header-row">
+                <h2>Getting Started</h2>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+
+                <div class="card">
+                    <h3 style="color:var(--accent);">Step 1 — Pair Your Phone</h3>
+                    <ol style="padding-left:20px; line-height:2; color:var(--text-secondary); font-size:0.9rem;">
+                        <li>Make sure your phone is on the <strong style="color:#fff">same Wi-Fi</strong> as this PC.
+                        </li>
+                        <li>Click <strong style="color:var(--accent)">"+ Pair Mobile"</strong> on the Overview tab.</li>
+                        <li>Scan the QR code with your phone's camera app.</li>
+                        <li>Enter the <strong style="color:var(--accent)">6-digit PIN</strong> shown in the sidebar.
+                        </li>
+                        <li>The Hub will show an approval popup — click <strong style="color:#fff">Allow</strong>.</li>
+                    </ol>
+                </div>
+
+                <div class="card">
+                    <h3 style="color:var(--accent);">Step 2 — Connect an Agent PC</h3>
+                    <ol style="padding-left:20px; line-height:2; color:var(--text-secondary); font-size:0.9rem;">
+                        <li>On the <strong style="color:#fff">Agent PC</strong>, run <code
+                                style="color:var(--accent); background:rgba(0,255,149,0.08); padding:2px 6px; border-radius:4px;">GestureLink_Agent.exe</code>
+                        </li>
+                        <li>Both PCs must be on the <strong style="color:#fff">same Wi-Fi network</strong>.</li>
+                        <li>On your phone, go to the <strong style="color:#fff">Devices</strong> tab and tap <strong
+                                style="color:var(--accent)">Scan Network</strong>.</li>
+                        <li>The Agent PC will appear — tap <strong style="color:var(--accent)">Connect</strong>.</li>
+                        <li>Use the Trackpad or gesture camera to control the Agent PC.</li>
+                    </ol>
+                </div>
+
+                <div class="card">
+                    <h3 style="color:var(--accent);">Step 3 — Use the Trackpad</h3>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;">
+                        <div
+                            style="background:rgba(0,255,149,0.05); border:1px solid rgba(0,255,149,0.15); border-radius:12px; padding:14px;">
+                            <div style="font-weight:700; font-size:0.95rem; margin-bottom:6px;">☝️ 1-Finger Drag</div>
+                            <div style="color:var(--text-secondary); font-size:0.8rem;">Move the cursor</div>
+                        </div>
+                        <div
+                            style="background:rgba(0,255,149,0.05); border:1px solid rgba(0,255,149,0.15); border-radius:12px; padding:14px;">
+                            <div style="font-weight:700; font-size:0.95rem; margin-bottom:6px;">👆 1-Finger Tap</div>
+                            <div style="color:var(--text-secondary); font-size:0.8rem;">Left Click</div>
+                        </div>
+                        <div
+                            style="background:rgba(0,255,149,0.05); border:1px solid rgba(0,255,149,0.15); border-radius:12px; padding:14px;">
+                            <div style="font-weight:700; font-size:0.95rem; margin-bottom:6px;">✌️ 2-Finger Tap</div>
+                            <div style="color:var(--text-secondary); font-size:0.8rem;">Right Click</div>
+                        </div>
+                        <div
+                            style="background:rgba(0,255,149,0.05); border:1px solid rgba(0,255,149,0.15); border-radius:12px; padding:14px;">
+                            <div style="font-weight:700; font-size:0.95rem; margin-bottom:6px;">✌️ 2-Finger Drag</div>
+                            <div style="color:var(--text-secondary); font-size:0.8rem;">Scroll</div>
+                        </div>
+                        <div
+                            style="background:rgba(0,255,149,0.05); border:1px solid rgba(0,255,149,0.15); border-radius:12px; padding:14px; grid-column: span 2;">
+                            <div style="font-weight:700; font-size:0.95rem; margin-bottom:6px;">🤙 3/4-Finger Hold (1s)
+                            </div>
+                            <div style="color:var(--text-secondary); font-size:0.8rem;">Trigger custom app shortcut
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 style="color:var(--accent);">Step 4 — Gesture Camera Control</h3>
+                    <ol style="padding-left:20px; line-height:2; color:var(--text-secondary); font-size:0.9rem;">
+                        <li>On your phone, go to the <strong style="color:#fff">Control</strong> tab.</li>
+                        <li>Toggle the <strong style="color:var(--accent)">PC Camera</strong> switch ON.</li>
+                        <li>The Hub's camera will activate (visible in Overview).</li>
+                        <li>Use hand gestures in front of the camera to control the PC.</li>
+                    </ol>
+                    <div
+                        style="margin-top:16px; padding:14px; background:rgba(255,200,0,0.07); border:1px solid rgba(255,200,0,0.2); border-radius:12px; font-size:0.8rem; color:#ffd700;">
+                        ⚡ <strong>Tip:</strong> For best results, ensure good lighting and keep your hand 30–60cm from
+                        the camera.
+                    </div>
+                </div>
+
+                <div class="card" style="grid-column: span 2;">
+                    <h3 style="color:var(--accent);">Gesture Reference (Cursor Mode)</h3>
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px; margin-top:16px;">
+                        <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px; padding:16px; text-align:center;">
+                            <div style="font-size:2rem; margin-bottom:8px;">☝️</div>
+                            <div style="font-weight:700; color:#fff;">Move Cursor</div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary);">Index finger only</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px; padding:16px; text-align:center;">
+                            <div style="font-size:2rem; margin-bottom:8px;">✌️</div>
+                            <div style="font-weight:700; color:#fff;">Left Click / Drag</div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary);">Index + Middle (V-sign)</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px; padding:16px; text-align:center;">
+                            <div style="font-size:2rem; margin-bottom:8px;">🤘</div>
+                            <div style="font-weight:700; color:#fff;">Right Click</div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary);">Rock sign (Index + Pinky)</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px; padding:16px; text-align:center;">
+                            <div style="font-size:2rem; margin-bottom:8px;">✋</div>
+                            <div style="font-weight:700; color:#fff;">Scroll</div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary);">3 fingers up (Move hand)</div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px; padding:16px; text-align:center;">
+                            <div style="font-size:2rem; margin-bottom:8px;">🤙</div>
+                            <div style="font-weight:700; color:#fff;">Switch Mode</div>
+                            <div style="font-size:0.8rem; color:var(--text-secondary);">Pinky hold (1 second)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section id="logs" class="section">
-            <div class="header-row"><h2>System Logs</h2></div>
-            <div class="card" style="font-family: monospace; font-size: 0.8rem; background: #000; color: #0f0; max-height: 400px; overflow-y: auto;">
+            <div class="header-row">
+                <h2>System Logs</h2>
+            </div>
+            <div class="card"
+                style="font-family: monospace; font-size: 0.8rem; background: #000; color: #0f0; max-height: 400px; overflow-y: auto;">
                 <div style="padding: 10px;">[INFO] Hub initialized successfully.</div>
                 <div style="padding: 10px;">[INFO] Security Manager active.</div>
             </div>
         </section>
 
         <section id="settings" class="section">
-            <div class="header-row"><h2>Hub Settings</h2></div>
+            <div class="header-row">
+                <h2>Hub Settings</h2>
+            </div>
             <div class="card">
                 <h3>General</h3>
-                <p style="color: var(--text-secondary); margin-bottom: 20px;">Manage Hub-wide security and performance parameters.</p>
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--surface); border-radius: 12px;">
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">Manage Hub-wide security and performance
+                    parameters.</p>
+                <div
+                    style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--surface); border-radius: 12px;">
                     <span>Auto-Rotate PIN</span>
                     <span style="color: var(--accent);">Enabled (30m)</span>
                 </div>
@@ -370,10 +560,13 @@
         </section>
     </main>
 
-    <div id="alert-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
-        <div class="card" style="width: 400px; border: 2px solid var(--accent); background: var(--bg); padding: 32px; text-align: center;">
+    <div id="alert-overlay"
+        style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+        <div class="card"
+            style="width: 400px; border: 2px solid var(--accent); background: var(--bg); padding: 32px; text-align: center;">
             <h3 style="color: var(--accent); margin-bottom: 16px;"><i class="fas fa-shield-alt"></i> Access Request</h3>
-            <p id="alert-text" style="margin-bottom: 24px; color: var(--text-primary);">A new device is requesting access to control this Hub.</p>
+            <p id="alert-text" style="margin-bottom: 24px; color: var(--text-primary);">A new device is requesting
+                access to control this Hub.</p>
             <div id="alert-actions" style="display: flex; gap: 12px;">
                 <button id="alert-approve" class="btn btn-primary" style="flex:1">Approve</button>
                 <button id="alert-deny" class="btn btn-danger" style="flex:1">Deny</button>
@@ -384,11 +577,14 @@
     <div id="qr-modal">
         <div class="card" style="width: 340px; text-align:center; padding: 32px; border-color: var(--accent);">
             <h3 style="margin-bottom: 24px; color: #fff;">Pair New Device</h3>
-            <div style="background: white; padding: 12px; border-radius: 16px; margin-bottom: 24px; display: inline-block; box-shadow: 0 0 30px var(--accent-glow);">
+            <div
+                style="background: white; padding: 12px; border-radius: 16px; margin-bottom: 24px; display: inline-block; box-shadow: 0 0 30px var(--accent-glow);">
                 <img id="qr-img" src="/lan-qr.png" alt="QR Code" style="width: 220px; height: 220px; display: block;">
             </div>
-            <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 24px; line-height: 1.5;">Scan this code with your phone to open the controller app immediately.</p>
-            <button onclick="document.getElementById('qr-modal').style.display='none'" class="btn" style="width:100%">Close</button>
+            <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 24px; line-height: 1.5;">Scan this
+                code with your phone to open the controller app immediately.</p>
+            <button onclick="document.getElementById('qr-modal').style.display='none'" class="btn"
+                style="width:100%">Close</button>
         </div>
     </div>
 
@@ -478,7 +674,7 @@
                 return;
             }
             list.innerHTML = clients.map(c => {
-                const mins = Math.floor((Date.now()/1000 - c.connected_at) / 60);
+                const mins = Math.floor((Date.now() / 1000 - c.connected_at) / 60);
                 const duration = mins < 1 ? 'Just connected' : `${mins}m connected`;
                 return `
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:16px; background:rgba(0,255,149,0.05); border:1px solid rgba(0,255,149,0.15); border-radius:12px; margin-bottom:12px;">
@@ -604,7 +800,7 @@
                             peerConn.onicecandidate = e => {
                                 if (e.candidate) fetch(`/api/webrtc/signal/${signal.from}`, {
                                     method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
+                                    headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ type: "candidate", candidate: e.candidate })
                                 });
                             };
@@ -613,14 +809,14 @@
                             await peerConn.setLocalDescription(answer);
                             fetch(`/api/webrtc/signal/${signal.from}`, {
                                 method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
+                                headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ type: "answer", sdp: answer.sdp })
                             });
                         } else if (signal.type === "candidate" && peerConn) {
                             await peerConn.addIceCandidate(new RTCIceCandidate(signal.candidate));
                         }
                     }
-                } catch (e) {}
+                } catch (e) { }
                 await new Promise(r => setTimeout(r, 1000));
             }
         }
@@ -628,9 +824,10 @@
         initLocalWS();
         pollSignals();
         fetchUpdates().then(() => {
-            // Issue 3: poll every 1s so pair requests appear within 1 second
-            setInterval(fetchUpdates, 1000);
+            // Throttled to 3s to reduce server console spam
+            setInterval(fetchUpdates, 3000);
         });
     </script>
 </body>
+
 </html>
