@@ -119,6 +119,25 @@ async def get_apps():
     sm = ShortcutManager()
     return {"apps": sm.get_available_apps()}
 
+@app.get("/api/settings")
+async def get_settings():
+    return {
+        "sensitivity": int(CONFIG.gesture.trackpad_sensitivity * 33.3), # Map 1.5 to ~50
+        "trackpad_sensitivity": CONFIG.gesture.trackpad_sensitivity
+    }
+
+@app.post("/api/settings")
+async def set_settings(payload: dict):
+    # If "sensitivity" (0-100) is provided, map it to a multiplier (0.5 to 3.0)
+    if "sensitivity" in payload:
+        val = float(payload["sensitivity"])
+        CONFIG.gesture.trackpad_sensitivity = 0.5 + (val / 100.0) * 2.5
+    elif "trackpad_sensitivity" in payload:
+        CONFIG.gesture.trackpad_sensitivity = float(payload["trackpad_sensitivity"])
+    
+    logging.info(f"Agent sensitivity updated to: {CONFIG.gesture.trackpad_sensitivity}")
+    return {"ok": True, "trackpad_sensitivity": CONFIG.gesture.trackpad_sensitivity}
+
 async def _camera_loop():
     global camera_active, vision, mouse
     cap = cv2.VideoCapture(0)
@@ -199,8 +218,8 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
                         dx, dy = float(data.get("dx", 0)), float(data.get("dy", 0))
                         
                         # Accumulate the fractional movements
-                        frac_x += dx * 1.5
-                        frac_y += dy * 1.5
+                        frac_x += dx * CONFIG.gesture.trackpad_sensitivity
+                        frac_y += dy * CONFIG.gesture.trackpad_sensitivity
                         
                         move_x = int(frac_x)
                         move_y = int(frac_y)

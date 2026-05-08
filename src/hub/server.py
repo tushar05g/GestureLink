@@ -79,10 +79,14 @@ SECURITY_FILE = HUB_DIR / "security.json"
 CERT_PEM = resource_path("cert.pem")
 KEY_PEM  = resource_path("key.pem")
 
-def _save_settings(sensitivity: int, scroll_speed: int) -> None:
+def _save_settings(sensitivity: int, scroll_speed: int, trackpad_sensitivity: float = 1.5) -> None:
     try:
         with open(SETTINGS_FILE, "w") as f:
-            json.dump({"sensitivity": sensitivity, "scroll_speed": scroll_speed}, f)
+            json.dump({
+                "sensitivity": sensitivity, 
+                "scroll_speed": scroll_speed,
+                "trackpad_sensitivity": trackpad_sensitivity
+            }, f)
     except Exception as e:
         logger.error("Failed to save settings: %s", e)
 
@@ -93,11 +97,17 @@ def _load_settings() -> None:
                 data = json.load(f)
                 sens = data.get("sensitivity", 50)
                 scroll = data.get("scroll_speed", 20)
+                tp_sens = data.get("trackpad_sensitivity", 1.5)
+                
+                # Apply vision settings
                 alpha = 0.05 + (sens - 5) / 90.0 * 0.45
                 thresh = 8.0 - (sens - 5) / 90.0 * 7.0
                 CONFIG.gesture.smoothing = alpha
                 CONFIG.gesture.move_threshold_px = max(0.5, thresh)
+                
+                # Apply trackpad/scroll settings
                 CONFIG.gesture.scroll_speed = int(scroll)
+                CONFIG.gesture.trackpad_sensitivity = float(tp_sens)
         except Exception as e:
             logger.error("Failed to load settings: %s", e)
 
@@ -638,17 +648,46 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.get("/api/settings")
     async def get_settings() -> JSONResponse:
         s = CONFIG.gesture.smoothing
-        sensitivity = int((s - 0.05) / 0.45 * 90 + 5)
+        vision_sensitivity = int((s - 0.05) / 0.45 * 90 + 5)
         return JSONResponse({
-            "sensitivity": sensitivity,
+            "sensitivity": vision_sensitivity,
+            "trackpad_sensitivity": CONFIG.gesture.trackpad_sensitivity,
             "scroll_speed": CONFIG.gesture.scroll_speed
         })
 
     @app.post("/api/settings")
     async def set_settings(payload: Annotated[dict, Body(...)]) -> JSONResponse:
-        sens, scroll = payload.get("sensitivity", 50), payload.get("scroll_speed", 20)
-        _save_settings(sens, scroll)
-        _load_settings() # Re-apply
+        sens = payload.get("sensitivity", 50)
+        scroll = payload.get("scroll_speed", 20)
+        
+        # If 'sensitivity' (0-100) is sent from mobile, map it to the 0.5-3.0 trackpad multiplier
+        # Otherwise use the provided trackpad_sensitivity or the current value.
+        if "trackpad_sensitivity" in payload:
+            tp_sens = float(payload["trackpad_sensitivity"])
+        else:
+            tp_sens = 0.5 + (sens / 100.0) * 2.5
+        
+        _save_settings(sens, scroll, tp_sens)
+        _load_settings() # Re-apply local
+        
+        # Propagate to discovered agents
+        import httpx
+        async def notify_agents():
+            for ip in discovery.discovered_devices:
+                try:
+                    async with httpx.AsyncClient(verify=False) as client:
+                        # Map 1.5 base to a 0-100 scale if agent expects "sensitivity"
+                        # Or just send trackpad_sensitivity directly
+                        await client.post(
+                            f"https://{ip}:8001/api/settings", 
+                            json={"trackpad_sensitivity": tp_sens},
+                            timeout=2.0
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to sync settings to Agent {ip}: {e}")
+        
+        asyncio.create_task(notify_agents())
+        
         return JSONResponse({"ok": True})
 
     @app.websocket("/ws")

@@ -258,7 +258,8 @@ class MouseController:
         # Dynamic sensitivity based on movement speed
         speed = (dx*dx + dy*dy)**0.5
         boost = 1.0 + min(2.0, speed / 5.0) # Move faster when finger moves faster
-        sens = max(1.0, self.gc.smoothing * 30.0) * boost 
+        # Use the explicit trackpad sensitivity setting
+        sens = self.gc.trackpad_sensitivity * boost 
         
         self._frac_x += dx * sens
         self._frac_y += dy * sens
