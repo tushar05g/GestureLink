@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import sys
+import os
+
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 import io
 import json
 import logging
-import os
 import platform
 from pathlib import Path
 from typing import Dict, Optional, Any, Annotated
@@ -255,12 +262,85 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
             "port": port,
-            "ngrok_url": os.getenv("NGROK_URL")
+            "ngrok_url": os.getenv("NGROK_URL"),
+            "network_profile": await _get_network_profile()
         })
+
+    async def _get_network_profile() -> str:
+        if platform.system() != "Windows": return "Unknown"
+        try:
+            cmd = "powershell -Command \"Get-NetConnectionProfile | Select-Object -ExpandProperty NetworkCategory\""
+            proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout, _ = await proc.communicate()
+            return stdout.decode().strip() or "Unknown"
+        except Exception:
+            return "Unknown"
+
+    @app.post("/api/security/fix-firewall")
+    async def fix_firewall() -> JSONResponse:
+        if platform.system() != "Windows":
+            return JSONResponse({"ok": False, "error": "Only supported on Windows"})
+        
+        commands = [
+            'netsh advfirewall firewall add rule name="GestureLink Hub" dir=in action=allow protocol=TCP localport=8000',
+            'netsh advfirewall firewall add rule name="GestureLink Agent" dir=in action=allow protocol=TCP localport=8001'
+        ]
+        
+        results = []
+        for cmd in commands:
+            proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                err = stderr.decode().strip() or stdout.decode().strip()
+                if "elevation" in err.lower() or "administrator" in err.lower():
+                    return JSONResponse({
+                        "ok": False, 
+                        "error": "Access Denied. Please restart GestureLink Hub as Administrator to fix firewall rules automatically."
+                    })
+                results.append(err)
+        
+        if any(results):
+            return JSONResponse({"ok": False, "error": "; ".join(results)})
+            
+        return JSONResponse({"ok": True, "message": "Firewall rules added successfully!"})
 
     @app.get("/api/discovered")
     async def get_discovered() -> JSONResponse:
         return JSONResponse({"devices": discovery.discovered_devices})
+
+    @app.post("/api/agent/add-manual")
+    async def add_manual_agent(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Manually add an Agent IP when mDNS/Zeroconf discovery fails (e.g. on corporate Wi-Fi)."""
+        ip = payload.get("ip", "").strip()
+        if not ip:
+            return JSONResponse({"ok": False, "error": "No IP provided"}, status_code=400)
+        # Probe it first
+        try:
+            import httpx
+            async with httpx.AsyncClient(verify=False) as client:
+                resp = await client.get(f"https://{ip}:8001/api/ping", timeout=3.0)
+                data = resp.json()
+                hostname = data.get("hostname", ip)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Could not reach Agent at {ip}:8001 — {e}"})
+        
+        discovery.discovered_devices[ip] = hostname
+        logger.info("Manually added Agent: %s at %s", hostname, ip)
+        return JSONResponse({"ok": True, "ip": ip, "hostname": hostname})
+
+    @app.post("/api/agent/fix-firewall")
+    async def agent_fix_firewall(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Proxy request to the Agent PC to trigger its own firewall fix."""
+        ip = payload.get("ip", "").strip()
+        if not ip:
+            return JSONResponse({"ok": False, "error": "No Agent IP provided"}, status_code=400)
+        try:
+            import httpx
+            async with httpx.AsyncClient(verify=False) as client:
+                resp = await client.post(f"https://{ip}:8001/api/security/fix-firewall", timeout=5.0)
+                return JSONResponse(resp.json())
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Could not reach Agent at {ip}:8001 — {e}"})
 
     async def _hub_camera_loop():
         global hub_video_frame, hub_camera_active
@@ -378,8 +458,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         # Otherwise proxy to agent
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(f"http://{target}:8001/api/camera/toggle", json=payload, timeout=2.0)
+            async with httpx.AsyncClient(verify=False) as client:
+                resp = await client.post(f"https://{target}:8001/api/camera/toggle", json=payload, timeout=2.0)
                 return JSONResponse(resp.json())
         except Exception as e:
             logger.error("Proxy camera toggle failed for %s: %s", target, e)
@@ -419,8 +499,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         if ip and ip not in ("localhost", "127.0.0.1", detect_lan_ip()):
             try:
                 import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(f"http://{ip}:8001/api/apps", timeout=2.0)
+                async with httpx.AsyncClient(verify=False) as client:
+                    resp = await client.get(f"https://{ip}:8001/api/apps", timeout=2.0)
                     return JSONResponse(resp.json())
             except Exception as e:
                 logger.error("Proxy apps failed for %s: %s", ip, e)
@@ -590,9 +670,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         # AGENT RELAY LOGIC
         if target and target != local_ip:
             logger.info("RELAY PATH: proxying %s -> Agent %s", client_ip, target)
-            agent_url = f"ws://{target}:8001/ws?token=hub_internal"
+            agent_url = f"wss://{target}:8001/ws?token=hub_internal"
+            # Create a permissive SSL context that accepts self-signed certificates.
+            # ssl=False would disable SSL entirely (wrong — Agent requires WSS).
+            # ssl=True would validate the cert (fails for self-signed).
+            import ssl as _ssl
+            ssl_ctx = _ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = _ssl.CERT_NONE
             try:
-                async with websockets.connect(agent_url) as agent_ws:
+                async with websockets.connect(agent_url, ssl=ssl_ctx) as agent_ws:
                     async def mobile_to_agent():
                         try:
                             while True:
@@ -766,7 +853,11 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             target = f"{proto}://{detect_lan_ip()}:{port}"
         qr = qrcode.make(target)
         buf = io.BytesIO()
-        qr.save(buf, format="PNG")
+        try:
+            qr.save(buf, format="PNG")
+        except TypeError:
+            # Handle pure-python qrcode implementation which doesn't take 'format'
+            qr.save(buf)
         buf.seek(0)
         return StreamingResponse(buf, media_type="image/png")
 

@@ -406,6 +406,18 @@
                     <div id="agent-list">
                         <div class="empty-state">Searching network...</div>
                     </div>
+                    <div style="margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.08);">
+                        <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:10px;">
+                            🏢 On corporate Wi-Fi? Agents may not be auto-discovered. Enter the Agent PC's IP:
+                        </p>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <input id="manual-agent-ip" type="text" placeholder="e.g. 192.168.1.50"
+                                style="flex:1; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px 12px; color:#fff; font-size:0.85rem; min-width:160px;">
+                            <button onclick="addManualAgent()" class="btn btn-primary" style="font-size:0.8rem; padding:8px 14px;">Add Agent</button>
+                            <button onclick="fixAgentFirewall()" class="btn btn-danger" style="font-size:0.8rem; padding:8px 14px;" title="Sends a command to the Agent PC to open port 8001 in its firewall">🔧 Fix Agent Firewall</button>
+                        </div>
+                        <p id="manual-agent-status" style="font-size:0.75rem; margin-top:8px; color:var(--text-secondary);"></p>
+                    </div>
                 </section>
             </div>
         </section>
@@ -426,6 +438,15 @@
             <div class="header-row">
                 <h2>Getting Started</h2>
             </div>
+            <div id="network-warning" style="display:none; margin-bottom:24px; padding:20px; background:rgba(255, 71, 87, 0.1); border:1px solid rgba(255, 71, 87, 0.3); border-radius:16px;">
+                <h3 style="color:var(--danger); margin-bottom:8px; display:flex; align-items:center; gap:10px;">⚠️ Connection Warning</h3>
+                <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:16px;">
+                    Your PC is currently on a <strong>Public</strong> network profile. This usually blocks mobile connections. 
+                    Switch your Wi-Fi to <strong>Private</strong> in Windows settings, or use the fix below.
+                </p>
+                <button onclick="fixFirewall()" class="btn btn-danger" style="font-size:0.8rem; padding:8px 16px;">Fix Firewall Rules</button>
+            </div>
+
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
 
                 <div class="card">
@@ -603,10 +624,18 @@
 
         async function fetchUpdates() {
             try {
-                const data = window.infoData || {};
-                if (!data.pin) return;
-
+                const data = await (await fetch('/api/hub/info')).json();
+                window.infoData = data;
+                
                 document.getElementById('pin-display').textContent = data.pin;
+
+                // Network Warning
+                const netWarn = document.getElementById('network-warning');
+                if (data.network_profile === "Public") {
+                    netWarn.style.display = 'block';
+                } else {
+                    netWarn.style.display = 'none';
+                }
 
                 const proto = window.location.protocol;
                 const currentUrl = data.ngrok_url || `${proto}//${data.lan_ip}:${data.port}`;
@@ -759,6 +788,81 @@
             });
             fetchUpdates();
         }
+
+        async function fixFirewall() {
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = "Fixing...";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/security/fix-firewall', { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) {
+                    alert("Success: Firewall rules added! Try connecting your phone again.");
+                    document.getElementById('network-warning').style.display = 'none';
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch (err) {
+                alert("Failed to connect to Hub: " + err);
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function addManualAgent() {
+            const ip = document.getElementById('manual-agent-ip').value.trim();
+            const status = document.getElementById('manual-agent-status');
+            if (!ip) { status.textContent = '⚠️ Please enter an IP address.'; return; }
+            status.textContent = `🔍 Connecting to ${ip}:8001...`;
+            try {
+                const res = await fetch('/api/agent/add-manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    status.style.color = 'var(--accent)';
+                    status.textContent = `✅ Agent "${data.hostname}" added at ${data.ip}!`;
+                    fetchUpdates();
+                } else {
+                    status.style.color = 'var(--danger)';
+                    status.textContent = `❌ ${data.error}`;
+                }
+            } catch (err) {
+                status.style.color = 'var(--danger)';
+                status.textContent = `❌ Network error: ${err}`;
+            }
+        }
+
+        async function fixAgentFirewall() {
+            const ip = document.getElementById('manual-agent-ip').value.trim();
+            const status = document.getElementById('manual-agent-status');
+            if (!ip) { status.textContent = '⚠️ Enter the Agent IP first.'; return; }
+            status.textContent = `🔧 Sending firewall fix to ${ip}...`;
+            try {
+                const res = await fetch('/api/agent/fix-firewall', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    status.style.color = 'var(--accent)';
+                    status.textContent = `✅ Agent firewall fixed! Now try "Add Agent".`;
+                } else {
+                    status.style.color = 'var(--danger)';
+                    status.textContent = `❌ ${data.error}`;
+                }
+            } catch (err) {
+                status.style.color = 'var(--danger)';
+                status.textContent = `❌ Network error: ${err}`;
+            }
+        }
+
 
         // WebRTC & Vision Relay
         let peerConn = null;

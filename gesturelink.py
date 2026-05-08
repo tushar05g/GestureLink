@@ -4,9 +4,20 @@ GestureLink — Unified Command Center
 Launch and manage your AI-powered gesture control suite.
 """
 import sys
+import os
+import multiprocessing
+
+# CRITICAL: Fix for PyInstaller + Multiprocessing
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 import argparse
 import subprocess
-import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
