@@ -3,18 +3,18 @@ import os
 import multiprocessing
 
 # --- Single-Instance Mutex (Windows) ---
-# This named mutex lets the Inno Setup installer detect that the Hub is running
+# This named mutex lets the Inno Setup installer detect that the Agent is running
 # and close it gracefully before overwriting files during an update.
-_hub_mutex = None
+_agent_mutex = None
 if sys.platform == "win32":
     try:
         import ctypes
-        _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkHub")
+        _agent_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkAgent")
         if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
             import tkinter as tk
             from tkinter import messagebox
             root = tk.Tk(); root.withdraw()
-            messagebox.showerror("GestureLink Hub", "GestureLink Hub is already running.\nCheck the system tray.")
+            messagebox.showerror("GestureLink Agent", "GestureLink Agent is already running.\nCheck the system tray.")
             root.destroy()
             sys.exit(1)
     except Exception:
@@ -24,26 +24,19 @@ if sys.platform == "win32":
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
+import threading
+import socket
+import pystray
+from pystray import MenuItem as item
+from PIL import Image, ImageDraw
+import uvicorn
+from src.agent.main import app
+
 # Fix for PyInstaller with console=False
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
-
-import threading
-import webbrowser
-import socket
-import os
-import signal
-import sys
-from pathlib import Path
-from PIL import Image, ImageDraw
-import pystray
-from pystray import MenuItem as item
-
-from src.hub.server import build_app
-from src.hub.managers import detect_lan_ip
-import uvicorn
 
 def _start_shutdown_listener(on_shutdown):
     """
@@ -93,7 +86,7 @@ def _start_shutdown_listener(on_shutdown):
 
     def _run():
         hinstance  = kernel32.GetModuleHandleW(None)
-        class_name = "GL_HubShutdownWatcher"
+        class_name = "GL_AgentShutdownWatcher"
         wc = WNDCLASSEX()
         wc.cbSize        = ctypes.sizeof(WNDCLASSEX)
         wc.lpfnWndProc   = _wnd_proc_ref
@@ -101,7 +94,7 @@ def _start_shutdown_listener(on_shutdown):
         wc.lpszClassName = class_name
         user32.RegisterClassExW(ctypes.byref(wc))
         # Top-level hidden window (NOT message-only) so it receives the broadcast
-        user32.CreateWindowExW(0, class_name, "GL_HubShutdownWatcher", 0,
+        user32.CreateWindowExW(0, class_name, "GL_AgentShutdownWatcher", 0,
                                0, 0, 0, 0, None, None, hinstance, None)
         msg = ctypes.wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
@@ -111,67 +104,45 @@ def _start_shutdown_listener(on_shutdown):
     threading.Thread(target=_run, daemon=True).start()
 
 
-class GestureLinkTray:
-    def __init__(self):
-        self.host = "0.0.0.0"
-        self.port = 8000
-        self.server_thread = None
+class AgentTray:
+    def __init__(self, port=8001):
+        self.port = port
         self.icon = None
-        self.app = build_app(host=self.host, port=self.port)
 
     def create_icon_image(self):
-        # Premium V3 'Digital Hand' Icon logic
         width = 64
         height = 64
         image = Image.new('RGBA', (width, height), color=(0, 0, 0, 0))
         dc = ImageDraw.Draw(image)
-        main_color = (0, 255, 149, 255) # Neon Mint
+        # Agent color: Cyber Blue
+        main_color = (0, 162, 255, 255) 
         
-        # Palm
-        dc.rounded_rectangle([15, 40, 49, 55], radius=5, fill=main_color)
-        # Fingers
-        dc.rounded_rectangle([15, 20, 21, 37], radius=2, fill=main_color) # Index
-        dc.rounded_rectangle([24, 12, 30, 37], radius=2, fill=main_color) # Middle
-        dc.rounded_rectangle([33, 15, 39, 37], radius=2, fill=main_color) # Ring
-        dc.rounded_rectangle([42, 25, 48, 37], radius=2, fill=main_color) # Pinky
-        # Thumb
-        dc.rounded_rectangle([5, 37, 12, 45], radius=2, fill=main_color)
+        # Micro-Agent Icon (smaller palm + dots)
+        dc.rounded_rectangle([20, 35, 44, 50], radius=4, fill=main_color)
+        dc.ellipse([20, 15, 28, 23], fill=main_color) # Dot 1
+        dc.ellipse([36, 15, 44, 23], fill=main_color) # Dot 2
         
-        # Signal Arcs
-        dc.arc([2, 2, 61, 61], start=210, end=330, fill=main_color, width=2)
-        dc.arc([10, 10, 54, 54], start=210, end=330, fill=main_color, width=1)
+        # Signal Ring
+        dc.ellipse([5, 5, 59, 59], outline=main_color, width=2)
         
-        # Background Circle for contrast in tray
         bg = Image.new('RGBA', (width, height), color=(3, 7, 12, 255))
-        final = Image.alpha_composite(bg, image)
-        return final
-
-    def on_open_hub(self):
-        webbrowser.open(f"http://localhost:{self.port}/hub")
-
-    def on_copy_ip(self):
-        ip = detect_lan_ip()
-        try:
-            import pyperclip
-            pyperclip.copy(ip)
-            print(f"Copied to clipboard: {ip}")
-        except ImportError:
-            print(f"Hub IP: {ip}")
+        return Image.alpha_composite(bg, image)
 
     def on_quit(self):
-        print("Shutting down GestureLink...")
         if self.icon:
             self.icon.stop()
+        os._exit(0)
 
     def run_server(self):
+        # The agent's app is imported from src.agent.main
         from src.core.utils import resource_path
         cert = str(resource_path("cert.pem"))
         key = str(resource_path("key.pem"))
         
-        # Launch with SSL to ensure camera access and matching HTTPS dashboard
+        # Launch with SSL to allow HTTPS-based mobile control
         uvicorn.run(
-            self.app, 
-            host=self.host, 
+            app, 
+            host="0.0.0.0", 
             port=self.port, 
             log_level="info",
             ssl_keyfile=key,
@@ -180,33 +151,32 @@ class GestureLinkTray:
 
     def run(self):
         # --- Graceful shutdown: SIGTERM + Windows Restart Manager ---
+        import signal
         signal.signal(signal.SIGTERM, lambda s, f: self.on_quit())
         signal.signal(signal.SIGINT,  lambda s, f: self.on_quit())
         if sys.platform == "win32":
             _start_shutdown_listener(self.on_quit)
 
-        # Start FastAPI in a background thread
-        self.server_thread = threading.Thread(target=self.run_server, daemon=True)
-        self.server_thread.start()
+        threading.Thread(target=self.run_server, daemon=True).start()
 
-        # Create System Tray Icon
         menu = (
-            item('Open Hub UI', self.on_open_hub),
-            item('Copy Hub IP', self.on_copy_ip),
-            item('Exit', self.on_quit),
+            item('GestureLink Agent (Online)', lambda: None, enabled=False),
+            item('Exit Agent', self.on_quit),
         )
         
         self.icon = pystray.Icon(
-            "GestureLink",
+            "GestureLinkAgent",
             self.create_icon_image(),
-            "GestureLink Hub",
+            "GestureLink Agent",
             menu
         )
-        
-        print(f"GestureLink Hub running on http://{detect_lan_ip()}:{self.port}")
-        print("Tray icon active. Access the dashboard via the taskbar.")
         self.icon.run()
 
 if __name__ == "__main__":
-    tray = GestureLinkTray()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8001)
+    args = parser.parse_args()
+    
+    tray = AgentTray(port=args.port)
     tray.run()

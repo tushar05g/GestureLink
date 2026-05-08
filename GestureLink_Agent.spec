@@ -11,6 +11,9 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH)
 
+import mediapipe
+mediapipe_path = os.path.dirname(mediapipe.__file__)
+
 block_cipher = None
 
 hidden_imports = [
@@ -41,9 +44,13 @@ hidden_imports = [
     "anyio._backends._asyncio",
     # Mediapipe (needed for optional camera on Agent)
     "mediapipe",
+    "mediapipe.python._framework_bindings",
     "mediapipe.tasks",
+    "mediapipe.tasks.c",
     "mediapipe.tasks.python",
     "mediapipe.tasks.python.vision",
+    "mediapipe.tasks.python.core",
+    "mediapipe.tasks.python.core.mediapipe_c_bindings",
     # Computer vision
     "cv2",
     "numpy",
@@ -72,10 +79,15 @@ hidden_imports = [
 datas = [
     # AI Model (for Agent camera mode)
     (str(ROOT / "src" / "core" / "models"), "src/core/models"),
+    # Mediapipe C bindings
+    (os.path.join(mediapipe_path, "tasks", "c"), "mediapipe/tasks/c"),
+    # SSL certificates
+    (str(ROOT / "cert.pem"), "."),
+    (str(ROOT / "key.pem"), "."),
 ]
 
 a = Analysis(
-    [str(ROOT / "src" / "agent" / "main.py")],
+    [str(ROOT / "src" / "agent" / "tray.py")],
     pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
@@ -85,7 +97,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "tkinter",
-        "matplotlib",
         "scipy",
         "IPython",
         "notebook",
@@ -118,7 +129,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,       # Keep console visible for debugging
+    console=False,      # Hide the terminal window to run silently in the background
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

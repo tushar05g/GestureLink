@@ -1,3 +1,12 @@
+import sys
+import os
+
+# Fix for PyInstaller with console=False (prevent NoneType has no attribute 'isatty' in uvicorn)
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 import json
 import socket
 import logging
@@ -27,24 +36,82 @@ vision = None
 mouse = None
 
 def _detect_lan_ips() -> list[str]:
-    found = set()
+    """Return real LAN IPs, excluding VMware/Hyper-V virtual adapters.
+    
+    Strategy: Use the route-based getsockname() trick as primary source —
+    it picks the ACTUAL outbound interface (Wi-Fi / Ethernet), never VMnet.
+    gethostbyname_ex() is avoided because it returns ALL adapters including
+    VMware VMnet8, Hyper-V vEthernet, etc.
+    """
+    found = []
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
-            found.add(s.getsockname()[0])
-    except OSError: pass
-    try:
-        ips = socket.gethostbyname_ex(socket.gethostname())[2]
-        for ip in ips:
-            if not ip.startswith("127."): found.add(ip)
-    except: pass
-    # Prioritize LAN ranges
-    lan = [ip for ip in found if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.")]
-    return sorted(list(lan if lan else found)) if found else ["127.0.0.1"]
+            ip = s.getsockname()[0]
+            if not ip.startswith("127."):
+                found.append(ip)
+    except OSError:
+        pass
+    
+    if not found:
+        # Fallback: enumerate adapters but skip obvious virtual ranges
+        VIRTUAL_PREFIXES = ("192.168.56.", "192.168.234.", "192.168.100.")
+        try:
+            ips = socket.gethostbyname_ex(socket.gethostname())[2]
+            for ip in ips:
+                if not ip.startswith("127.") and not any(ip.startswith(p) for p in VIRTUAL_PREFIXES):
+                    found.append(ip)
+        except Exception:
+            pass
+    
+    return found if found else ["127.0.0.1"]
+
+def _detect_lan_ip() -> str:
+    """Return a single best-guess LAN IP."""
+    ips = _detect_lan_ips()
+    return ips[0] if ips else "127.0.0.1"
 
 @app.get("/api/ping")
 async def ping():
     return {"ok": True, "hostname": socket.gethostname(), "ip": _detect_lan_ip()}
+
+@app.get("/api/agent/info")
+async def agent_info():
+    """Returns agent status info for the Hub dashboard."""
+    return {
+        "hostname": socket.gethostname(),
+        "ip": _detect_lan_ip(),
+        "port": 8001,
+        "camera_active": camera_active,
+    }
+
+@app.post("/api/security/fix-firewall")
+async def fix_firewall():
+    """Adds Windows Firewall rules to allow inbound traffic on port 8001.
+    Requires the Agent to be running as Administrator (which it does via uac_admin=True in the .spec).
+    """
+    if platform.platform().lower().startswith("win"):
+        pass  # Always try on Windows
+    else:
+        return {"ok": False, "error": "Only supported on Windows"}
+
+    import asyncio
+    cmd = 'netsh advfirewall firewall add rule name="GestureLink Agent" dir=in action=allow protocol=TCP localport=8001'
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode().strip() or stdout.decode().strip()
+            if "elevation" in err.lower() or "administrator" in err.lower() or "access" in err.lower():
+                return {"ok": False, "error": "Access Denied. Please restart GestureLink Agent as Administrator."}
+            return {"ok": False, "error": err}
+        return {"ok": True, "message": "Firewall rule added for port 8001!"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 @app.get("/api/apps")
 async def get_apps():
@@ -60,6 +127,12 @@ async def _camera_loop():
         if not ret:
             await asyncio.sleep(0.01)
             continue
+        
+        # Mirror the frame so cursor movement matches hand direction.
+        # Without this, lm[8].x increases left-to-right in the RAW frame,
+        # but the physical hand appears mirrored → cursor moves opposite.
+        # The Hub does the same flip in _hub_camera_loop().
+        frame = cv2.flip(frame, 1)
         
         # Process frame via AsyncVisionWorker
         # Returns tuple: (GestureState, annotated_bytes) or None

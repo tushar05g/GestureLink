@@ -18,6 +18,12 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
+; Auto-close running instances before overwriting files
+CloseApplications=yes
+; Re-launch closed apps after installation completes (seamless update)
+RestartApplications=yes
+; Named mutexes registered in Hub/Agent tray.py — installer detects running instances instantly
+AppMutex=GestureLinkHub,GestureLinkAgent
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

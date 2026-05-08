@@ -11,6 +11,9 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH)
 
+import mediapipe
+mediapipe_path = os.path.dirname(mediapipe.__file__)
+
 block_cipher = None
 
 # ─── Hidden imports ───────────────────────────────────────────────────────────
@@ -51,10 +54,13 @@ hidden_imports = [
     "anyio._backends._trio",
     # Mediapipe
     "mediapipe",
+    "mediapipe.python._framework_bindings",
     "mediapipe.tasks",
+    "mediapipe.tasks.c",
     "mediapipe.tasks.python",
     "mediapipe.tasks.python.vision",
     "mediapipe.tasks.python.core",
+    "mediapipe.tasks.python.core.mediapipe_c_bindings",
     # Computer vision
     "cv2",
     "numpy",
@@ -108,11 +114,13 @@ datas = [
     (str(ROOT / "key.pem"),                                   "."),
     # .env (ngrok token, etc.)
     (str(ROOT / ".env"),                                      "."),
+    # Mediapipe C bindings
+    (os.path.join(mediapipe_path, "tasks", "c"),              "mediapipe/tasks/c"),
 ]
 
 # ─── Analysis ─────────────────────────────────────────────────────────────────
 a = Analysis(
-    [str(ROOT / "src" / "hub" / "server.py")],
+    [str(ROOT / "src" / "hub" / "tray.py")],
     pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
@@ -123,7 +131,6 @@ a = Analysis(
     excludes=[
         # Exclude large packages we don't need
         "tkinter",
-        "matplotlib",
         "scipy",
         "IPython",
         "notebook",
@@ -156,7 +163,7 @@ exe = EXE(
     upx=True,           # UPX compression — reduces file size ~20%
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,       # Keep console visible for now (change to False for silent)
+    console=False,      # Hide the terminal window for a true Desktop App feel
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
