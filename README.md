@@ -1,59 +1,75 @@
 # 🛰 GestureLink: The Unified AI Gesture Suite
 
-GestureLink transforms your computer into a futuristic, touchless command center. Using only your hand movements or your mobile phone as a super-trackpad, you can control multiple computers with professional precision.
+[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen.svg)](https://github.com/tushar05g/GestureLink)
+[![Platform](https://img.shields.io/badge/platform-windows-blue.svg)](https://github.com/tushar05g/GestureLink)
+[![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+
+GestureLink transforms your computer into a futuristic, touchless command center. Using only your hand movements or your mobile phone as a high-precision remote trackpad, you can control multiple computers with professional-grade accuracy.
 
 ---
 
 ## ✨ Key Features
 
-### 🖐 High-Precision Hand Control
-- **Adaptive Cursor**: Silky smooth movement using **One Euro Filter** technology.
-- **Smart Clicks**: Velocity-aware detection prevents accidental clicks.
-- **App Shortcuts**: Launch your favorite apps with simple hand poses.
+### 🖐 High-Precision AI Vision
+*   **Adaptive Cursor**: Silky smooth movement using **One Euro Filter** adaptive smoothing.
+*   **Gesture Recognition**: Custom hand poses (Pinch, V-Sign, Rock) for mouse actions.
+*   **ROI Mapping**: Intelligent "Safe Zone" detection for ergonomic hand movement.
 
-### 📱 Mobile Super-Trackpad (PWA)
-- **Zero-Install**: Scan a QR code and you're ready to go.
-- **Multi-Touch Gestures**: Two-finger scroll, right-click, and **Pinch-to-Zoom**.
-- **Double-Tap Drag**: Effortlessly move windows and select text.
-- **Hold-to-Launch**: Long-press with 3 or 4 fingers to trigger shortcuts securely.
+### 📱 Mobile Remote Console
+*   **Zero-Install PWA**: Scan a QR code to instantly turn your phone into a controller.
+*   **Multi-Touch Precision**: Two-finger scroll, right-click tap, and **Pinch-to-Zoom**.
+*   **Remote Sensitivity**: Tune your cursor speed and smoothing directly from your phone.
 
----
-
-## 🚀 Getting Started (The "Double-Click" Workflow)
-
-GestureLink is designed for everyone, no terminal required.
-
-### 1. Host your Hub (Main PC)
-- Double-click **`Start_Hub.py`**.
-- If it's your first time, the **Visual Installer** will guide you.
-- Once the Dashboard appears, scan the **QR Code** with your phone.
-
-### 2. Connect an Agent (Secondary PC/Laptop)
-- Copy the folder to your laptop and double-click **`Start_Agent.py`**.
-- It will automatically find your Hub and wait for your phone to authorize it.
+### 🌐 Multi-PC Ecosystem
+*   **Hub & Agent**: Control your main workstation and remote laptops from one interface.
+*   **Auto-Discovery**: Zeroconf (mDNS) protocol finds your devices instantly on Wi-Fi.
+*   **Encrypted Relay**: Secure WebSocket (WSS) tunneling for low-latency remote control.
 
 ---
 
-## 🛠 Advanced Configuration
+## 🚀 Installation & Updates
 
-All settings (Sensitivity, Smoothing, Shortcuts) can be tuned directly from the **Mobile Dashboard** or the **Hub Settings** window.
+GestureLink is now distributed as a professional Windows package.
 
-### Gestures Map:
+1.  **Download the Installer**: Run `GestureLink_Setup.exe`.
+2.  **Seamless Updates**: The installer automatically detects running instances, closes them gracefully, and restarts them after the update.
+3.  **Firewall Auto-Fix**: One-click setup for Windows Firewall rules to allow mobile connections.
+
+---
+
+## 🛠 Technology Stack
+
+GestureLink is built with a focus on performance and reliability:
+
+*   **Core:** Python 3.10+ with FastAPI & Uvicorn.
+*   **AI Vision:** MediaPipe Hand Landmarker (Dual-model pipeline).
+*   **Input:** PyAutoGUI with sub-pixel precision accumulators.
+*   **Networking:** Zeroconf (RFC 6762/6763) & Secure WebSockets.
+*   **Installer:** Inno Setup with Windows Restart Manager integration.
+
+> [!TIP]
+> For a deep-dive into the engineering behind GestureLink, check out our [Technical Documentation](TECHNICAL_DETAILS.md).
+
+---
+
+## 🎮 Gestures Map
+
 | Action | Hand Gesture | Mobile Touchpad |
 | :--- | :--- | :--- |
-| **Move Cursor** | Thumb Extended | Single Finger Slide |
-| **Left Click** | Thumb + Index Snap | Single Tap |
-| **Right Click** | Thumb + Middle Snap | Two-Finger Tap |
-| **Scroll** | Four Fingers Up | Two-Finger Slide |
-| **Zoom** | *Gesture Coming Soon* | Two-Finger Pinch |
-| **Shortcuts** | Hold Pose (1.5s) | Long-Press (1.0s) |
+| **Move Cursor** | Index Finger Only | Single Finger Slide |
+| **Left Click** | Index + Middle (V-Sign) | Single Tap |
+| **Right Click** | Rock Sign (Index + Pinky) | Two-Finger Tap |
+| **Scroll** | Three Fingers Up | Two-Finger Slide |
+| **Drag & Drop** | Hold V-Sign (0.3s) | Long-Press + Drag |
+| **Shortcuts** | Pinky Hold (1s) | 3/4-Finger Tap |
 
 ---
 
 ## 🔒 Security & Privacy
-- **PIN-Based Pairing**: Only authorized devices can control your mouse.
-- **Consent Notifications**: The Hub asks for your permission before any new device connects.
-- **Local-First**: All AI processing happens on your local machine.
+
+*   **6-Digit PIN Pairing**: Prevents unauthorized devices from controlling your PC.
+*   **Manual Consent**: Hub users must approve any new connection request.
+*   **Local Processing**: No video data ever leaves your local network.
 
 ---
 
