@@ -114,41 +114,60 @@ def _load_settings() -> None:
 def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     def _open_dashboard():
         import webbrowser, subprocess, os, time
-        time.sleep(1.5)  # Wait for server to start
+        # Give the tunnel 3 seconds to establish
+        time.sleep(3.0) 
+        
         proto = "https" if CERT_PEM.exists() else "http"
-        url = f"{proto}://localhost:{port}/hub"
+        local_url = f"{proto}://localhost:{port}/hub"
         
-        # Try to open as a Chrome "App" for a desktop feel (Issue #3)
-        chrome_paths = [
+        # Prioritize remote URL (Tunnel or Deployment)
+        remote_url = getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
+        target_url = remote_url if remote_url else local_url
+        
+        # Ensure we always open the /hub dashboard path on the PC
+        if not target_url.endswith("/hub"):
+            target_url = target_url.rstrip("/") + "/hub"
+        
+        # If we are falling back to localhost, show a debug popup
+        if target_url == local_url:
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(0, "App is running on local host (No active tunnel detected)", "GestureLink Debug", 0x40)
+            except: pass
+
+        # Attempt to use Chrome/Edge in App Mode for a "Clean" window
+        app_paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
         ]
-        for path in chrome_paths:
+        for path in app_paths:
             if os.path.exists(path):
                 try:
-                    subprocess.Popen([path, f"--app={url}"])
+                    subprocess.Popen([path, f"--app={target_url}"])
                     return
-                except Exception: pass
-        
-        # Try Edge app mode
-        edge_paths = [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-        ]
-        for path in edge_paths:
-            if os.path.exists(path):
-                try:
-                    subprocess.Popen([path, f"--app={url}"])
-                    return
-                except Exception: pass
+                except: pass
                 
         # Fallback to default browser
-        webbrowser.open(url)
+        webbrowser.open(target_url)
 
     # --- LIFESPAN HANDLER (Startup/Shutdown) ---
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
         _load_settings()
+        
+        # Load Friendly Name from config
+        app.state.friendly_name = platform.node()
+        config_path = os.path.join(os.path.dirname(__file__), "hub_config.json")
+        if os.path.exists(config_path):
+            try:
+                import json
+                with open(config_path, "r") as f:
+                    app.state.friendly_name = json.load(f).get("friendly_name", platform.node())
+            except: pass
+            
         discovery.start()
         lan_ip = detect_lan_ip()
         proto = "https" if CERT_PEM.exists() else "http"
@@ -289,12 +308,29 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def get_connected_clients() -> JSONResponse:
         return JSONResponse({"clients": list(connected_clients.values())})
 
+    @app.post("/api/hub/name")
+    async def set_hub_name(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        name = payload.get("name", "")
+        if name:
+            app.state.friendly_name = name
+            # Save to local config file for non-tech persistence
+            config_path = os.path.join(os.path.dirname(__file__), "hub_config.json")
+            try:
+                import json
+                with open(config_path, "w") as f:
+                    json.dump({"friendly_name": name}, f)
+            except: pass
+            logger.info(f"Hub renamed to: {name}")
+            return JSONResponse({"ok": True})
+        return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
+
     @app.get("/api/hub/info")
     async def hub_info() -> JSONResponse:
         return JSONResponse({
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
             "port": port,
+            "hostname": getattr(app.state, "friendly_name", platform.node()),
             "ngrok_url": app.state.ngrok_url or os.getenv("NGROK_URL"),
             "network_profile": await _get_network_profile()
         })
