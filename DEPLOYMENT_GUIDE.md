@@ -1,40 +1,72 @@
-# 🚀 GestureLink Professional Deployment Guide
+# 🚀 GestureLink Deployment Guide
 
-Follow these 5 steps to take GestureLink from "Local" to "Global."
+This guide explains how to deploy GestureLink so you can control your PC from anywhere in the world.
 
-### 1. Host the Frontend (The "App" URL)
-*   **Platform**: [Vercel](https://vercel.com) or [Netlify](https://netlify.com).
-*   **Action**: Connect your GitHub repo. Set the "Build Command" to `npm run build` and "Output Directory" to `src/web/mobile/dist`.
-*   **Result**: You get a dedicated URL like `https://gesturelink-app.vercel.app`.
+---
 
-### 2. Set Up the Tunnel (The "API" URL)
-*   **Service**: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started-for-free/create-a-remote-tunnel/).
-*   **Action**: Buy a domain (e.g., `gesturelink.com`) on Cloudflare. Install `cloudflared` on your PC and map `api.gesturelink.com` to `localhost:8000`.
-*   **Result**: Your Hub PC is now securely online with a permanent address.
+## 📱 Phase 1: Mobile Frontend (Vercel)
 
-### 3. Add a TURN Server (The "Lag-Killer")
-*   **Service**: [Metered.ca](https://www.metered.ca/stun-turn) (Free tier available) or [Twilio](https://www.twilio.com/stun-turn).
-*   **Action**: Get your `Username`, `Credential`, and `URL`. 
-*   **Update**: Put these into your `.env` file on your Hub PC. The updated GestureLink code will automatically pick them up and share them with your phone.
+The mobile app is hosted on Vercel. This acts as the "remote control" in your pocket.
 
-### 4. Update Environment Variables
-Add these to your `.env` on your PC:
+### 1. Vercel Project Settings
+In the **Vercel Dashboard**, ensure your settings match these exactly:
+- **Framework Preset**: `Vite`
+- **Root Directory**: `src/web/mobile`
+- **Node.js Version**: `22.x` (Important!)
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+
+### 2. Required Files (Already created for you)
+Make sure these files are pushed to your GitHub:
+- `src/web/mobile/package.json` (Updated with TS 5.7+)
+- `src/web/mobile/.node-version` (Forced to Node 22)
+- `src/web/mobile/vercel.json` (Routing & Framework config)
+
+---
+
+## 💻 Phase 2: Hub Server (Your Local PC)
+
+The Hub is the "brain" that lives on your computer. It must be running for the mobile app to work.
+
+### 1. Environment Variables (`.env`)
+Create a `.env` file in the root directory:
 ```env
-# Cloudflare/Ngrok URL
-NGROK_URL=https://api.gesturelink.com
-
-# TURN Server Config
-TURN_URL=turn:your-turn-provider.com:443
-TURN_USERNAME=your_username
-TURN_PASSWORD=your_password
+NGROK_AUTH_TOKEN=your_token_here
+HUB_NAME=My Awesome PC
 ```
+*(Get your token for free at [ngrok.com](https://dashboard.ngrok.com/get-started/your-authtoken))*
 
-### 5. Deployment Complete!
-Now, when you scan the QR code, your phone will:
-1. Load the UI from Vercel (Fast).
-2. Connect to your PC via Cloudflare (Stable).
-3. Use your TURN server to find the shortest path (Zero-Lag).
+### 2. Launch the Hub
+Run the following command in your terminal:
+```bash
+python -m src.hub.server
+```
+- **What happens?** 
+  - It detects your ngrok token.
+  - It creates a **Public Tunnel**.
+  - It **Automatically opens your browser** to the dashboard.
+  - It **Generates a QR Code** on the screen.
 
+---
 
-## App deployment
-Use electron to make cross-platform app that can run on desktop and mobile.
+## 🔗 Phase 3: Connecting Everything
+
+1. **Open the Hub Dashboard** on your PC (it should open automatically when you run the server).
+2. **Scan the QR Code** using your phone.
+3. **Enjoy!** Your phone will now use the Vercel app to talk to your PC over the internet tunnel.
+
+---
+
+## 🛠 Troubleshooting
+
+### "No Output Directory" on Vercel
+- Check that your **Root Directory** is set to `src/web/mobile`.
+- Ensure you pushed the `vercel.json` file I just created.
+
+### "Command not found" on Vercel
+- Ensure your `package.json` uses the correct versions:
+  - `typescript: ^5.7.3`
+  - `vite: ^8.0.12`
+
+### Slow Connection
+- The system will automatically try to switch to **Local LAN mode** if your phone and PC are on the same Wi-Fi for zero-latency control.
