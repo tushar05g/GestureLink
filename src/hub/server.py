@@ -120,8 +120,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         proto = "https" if CERT_PEM.exists() else "http"
         local_url = f"{proto}://localhost:{port}/hub"
         
-        # Prioritize remote URL (Tunnel or Deployment)
-        remote_url = getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
+        # Prioritize remote URL (Cloudflare > ngrok > Deployment > Localhost)
+        remote_url = (
+            getattr(app.state, "cloudflare_url", None) or 
+            getattr(app.state, "ngrok_url", None) or 
+            os.getenv("NGROK_URL")
+        )
         target_url = remote_url if remote_url else local_url
         
         # Ensure we always open the /hub dashboard path on the PC
@@ -168,13 +172,77 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     app.state.friendly_name = json.load(f).get("friendly_name", platform.node())
             except: pass
             
+        # --- CLOUDFLARE TUNNEL (Preferred) ---
+        app.state.cloudflare_url = None
+        def _run_cf():
+            try:
+                import re, subprocess, threading, os
+                cmd = "cloudflared"
+                # Check local folder first (for bundled installer), then system paths
+                local_cf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloudflared.exe")
+                root_cf = os.path.join(os.getcwd(), "cloudflared.exe")
+                
+                if os.path.exists(local_cf):
+                    cmd = local_cf
+                elif os.path.exists(root_cf):
+                    cmd = root_cf
+                elif os.name == 'nt':
+                    common_paths = [
+                        os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "cloudflared", "cloudflared.exe"),
+                        os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "cloudflared", "cloudflared.exe"),
+                    ]
+                    for p in common_paths:
+                        if os.path.exists(p):
+                            cmd = p
+                            break
+
+                # Quick Tunnel (trycloudflare.com)
+                local_proto = "https" if os.path.exists(os.path.join(os.getcwd(), "cert.pem")) else "http"
+                print(f"  * Attempting Cloudflare Tunnel with: {cmd}")
+                
+                # If using HTTPS locally, we must tell cloudflared to ignore self-signed cert errors
+                tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://localhost:{port}"]
+                if local_proto == "https":
+                    tunnel_args.append("--no-tls-verify")
+
+                proc = subprocess.Popen(
+                    tunnel_args,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                app.state.cf_proc = proc
+                for line in iter(proc.stdout.readline, ""):
+                    match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                    if match:
+                        app.state.cloudflare_url = match.group(0)
+                        logger.info("Cloudflare Tunnel active: %s", app.state.cloudflare_url)
+                        break
+            except Exception as e:
+                print(f"  ! Cloudflare Error: {e}")
+                logger.error("Cloudflare Tunnel failed: %s", e)
+
+        import threading
+        threading.Thread(target=_run_cf, daemon=True).start()
+
         discovery.start()
+        # Wait a bit for Cloudflare (if it's starting)
+        for _ in range(50): # Wait up to 5 seconds
+            if getattr(app.state, "cloudflare_url", None): break
+            await asyncio.sleep(0.1)
+
         lan_ip = detect_lan_ip()
         proto = "https" if CERT_PEM.exists() else "http"
         print("\n" + "="*50)
         print("STARTING GESTURELINK HUB...")
         print(f"  * Local Dashboard:  {proto}://localhost:{port}/hub")
         print(f"  * Mobile Access:    {proto}://{lan_ip}:{port}")
+        
+        # Display Remote Tunnels
+        if getattr(app.state, "cloudflare_url", None):
+            print(f"  * Remote (Cloudflare): {app.state.cloudflare_url}")
+        if getattr(app.state, "ngrok_url", None):
+            print(f"  * Remote (ngrok):      {app.state.ngrok_url}")
+            
         print(f"  * Pairing PIN:      {tokens.current_pin}")
         print("="*50 + "\n")
         logger.info("Hub Started successfully.")
@@ -185,6 +253,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         
         app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
         app.state.cleanup_task = asyncio.create_task(_cleanup_signals_loop())
+        
         
         # --- NGROK TUNNEL ---
         app.state.ngrok_url = None
@@ -211,6 +280,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             logger.info("Closing ngrok tunnel...")
             ngrok.disconnect(app.state.ngrok_url)
             ngrok.kill()
+            
+        if hasattr(app.state, "cf_proc"):
+            logger.info("Closing Cloudflare tunnel...")
+            app.state.cf_proc.terminate()
             
         discovery.stop()
         vision_worker.stop()
@@ -566,6 +639,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         app.state.active_mode = mode % 3
         logger.info(f"Hub mode set to {app.state.active_mode} via API")
         return JSONResponse({"ok": True, "mode": app.state.active_mode})
+
+    @app.get("/api/hub/info")
+    async def get_hub_info():
+        return JSONResponse({
+            "friendly_name": getattr(app.state, "friendly_name", "GestureLink Hub"),
+            "lan_ip": detect_lan_ip(),
+            "port": port,
+            "ngrok_url": getattr(app.state, "ngrok_url", None),
+            "cloudflare_url": getattr(app.state, "cloudflare_url", None)
+        })
 
     @app.get("/api/apps")
     async def get_apps(ip: Optional[str] = None) -> JSONResponse:
@@ -947,11 +1030,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def hub_page():
         with open(HUB_HTML, "r", encoding="utf-8") as f:
             content = f.read()
+            
+        # Prioritize Cloudflare > ngrok
+        remote_url = getattr(app.state, "cloudflare_url", None) or getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
+        
         info = {
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
             "port": port,
-            "ngrok_url": app.state.ngrok_url or os.getenv("NGROK_URL")
+            "remote_url": remote_url,
+            "frontend_url": os.getenv("FRONTEND_URL")
         }
         # Fix: assign to window.infoData so fetchUpdates() can read it across the script
         injection = f"window.infoData = {json.dumps(info)};"
@@ -964,11 +1052,24 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     @app.get("/lan-qr.png")
     async def qr_gen(url: Optional[str] = None) -> StreamingResponse:
+        frontend_base = os.getenv("FRONTEND_URL")
+        
         if url:
             target = url
+        elif frontend_base:
+            # If we have a Frontend URL, we point the QR to it and pass our tunnel as a param
+            remote = getattr(app.state, "cloudflare_url", None) or getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
+            if remote:
+                target = f"{frontend_base.rstrip('/')}/?hub={remote}"
+            else:
+                # Fallback to LAN if no tunnel is ready yet
+                target = f"{frontend_base.rstrip('/')}/?hub={detect_lan_ip()}"
         else:
+            # Traditional fallback
             proto = "https" if CERT_PEM.exists() else "http"
             target = f"{proto}://{detect_lan_ip()}:{port}"
+            
+        logger.info(f"Generating QR for target: {target}")
         qr = qrcode.make(target)
         buf = io.BytesIO()
         try:

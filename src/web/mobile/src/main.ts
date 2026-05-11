@@ -471,13 +471,21 @@ saveAppShortcut.onclick = async () => {
 };
 
 async function startApp() {
+  // 0. Check for Hub URL in query params (from Vercel QR code)
+  const urlParams = new URLSearchParams(window.location.search);
+  const hubParam = urlParams.get('hub');
+  if (hubParam) {
+    const hubIp = hubParam.replace('https://', '').replace('http://', '');
+    addDeviceToList(hubIp, "Hub (QR Remote)");
+  }
+
   // Get hub info to find the Local LAN IP
   try {
     const res = await fetch(`${location.origin}/api/hub/info`);
     const data = await res.json();
     
-    // 1. Add the current domain (could be ngrok)
-    addDeviceToList(location.hostname, "Hub (Cloud Tunnel)");
+    // 1. Add the current domain
+    addDeviceToList(location.hostname, "Hub (Primary)");
     
     // 2. Add the Local LAN IP (if different)
     if (data.lan_ip && data.lan_ip !== location.hostname) {

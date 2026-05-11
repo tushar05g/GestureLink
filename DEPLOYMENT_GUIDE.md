@@ -28,13 +28,21 @@ Make sure these files are pushed to your GitHub:
 
 The Hub is the "brain" that lives on your computer. It must be running for the mobile app to work.
 
-### 1. Environment Variables (`.env`)
-Create a `.env` file in the root directory:
+### 1. Choose your Tunnel (Remote Access)
+
+#### Option A: Cloudflare Tunnel (Recommended - FREE & Faster)
+1. Download `cloudflared` from [Cloudflare Releases](https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.msi).
+2. Install it.
+3. GestureLink will **automatically** create a secure `trycloudflare.com` tunnel every time it starts.
+
+#### Option B: ngrok (Fallback)
+1. Get your token for free at [ngrok.com](https://dashboard.ngrok.com/get-started/your-authtoken).
+2. Add it to your `.env` file:
 ```env
 NGROK_AUTH_TOKEN=your_token_here
 HUB_NAME=My Awesome PC
+FRONTEND_URL=https://your-vercel-app.vercel.app
 ```
-*(Get your token for free at [ngrok.com](https://dashboard.ngrok.com/get-started/your-authtoken))*
 
 ### 2. Launch the Hub
 Run the following command in your terminal:
