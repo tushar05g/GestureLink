@@ -22,9 +22,16 @@ from src.core.utils import OneEuroFilter
 
 logger = logging.getLogger(__name__)
 
-pyautogui.PAUSE    = 0.0
-pyautogui.FAILSAFE = False # Prevent crashes when cursor hits corners
 import time
+import ctypes
+
+# Win32 Mouse Constants
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_WHEEL = 0x0800
 
 
 class _DragState(Enum):
@@ -168,11 +175,8 @@ class MouseController:
         
         # Only move if the change is above the threshold
         if dx > self.gc.move_threshold_px or dy > self.gc.move_threshold_px:
-            try:
-                pyautogui.moveTo(int(self._smooth_x), int(self._smooth_y),
-                                 duration=0, _pause=False)
-            except Exception as e:
-                logger.error(f"Move Error: {e}")
+            # Use direct Win32 call for zero-latency movement
+            ctypes.windll.user32.SetCursorPos(int(self._smooth_x), int(self._smooth_y))
 
     def _reset_drag(self) -> None:
         if self._drag_state == _DragState.COUNTING:
@@ -273,34 +277,39 @@ class MouseController:
         self._frac_y -= move_y
         
         if move_x != 0 or move_y != 0:
-            try:
-                pyautogui.moveRel(move_x, move_y, _pause=False)
-                self._last_move_time = now
-            except Exception as e:
-                logger.error(f"Touch Move Error: {e}")
+            # Use direct Win32 call for relative movement
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_MOVE, move_x, move_y, 0, 0)
+            self._last_move_time = now
             
         return "TOUCH MOVE"
 
     def handle_click(self, button: str = "left") -> str:
-        """Handle tap clicks from phone."""
-        pyautogui.click(button=button, _pause=False)
+        """Handle tap clicks from phone via direct Win32."""
+        if button == "left":
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        else:
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
         return f"{button.upper()} CLICK"
 
     def handle_click_state(self, button: str, is_down: bool) -> str:
-        """Handle persistent click states (down/up) for dragging."""
-        if is_down:
-            pyautogui.mouseDown(button=button, _pause=False)
-            return f"{button.upper()} DOWN"
+        """Handle persistent click states (down/up) for dragging via Win32."""
+        if button == "left":
+            flag = MOUSEEVENTF_LEFTDOWN if is_down else MOUSEEVENTF_LEFTUP
         else:
-            pyautogui.mouseUp(button=button, _pause=False)
-            return f"{button.upper()} UP"
+            flag = MOUSEEVENTF_RIGHTDOWN if is_down else MOUSEEVENTF_RIGHTUP
+        
+        ctypes.windll.user32.mouse_event(flag, 0, 0, 0, 0)
+        return f"{button.upper()} {'DOWN' if is_down else 'UP'}"
 
     def handle_touch_scroll(self, dy: float) -> str:
-        """Handle vertical scroll from phone."""
-        # Multiplier to make it feel natural
-        scroll_amount = int(dy * -1.5)
-        if abs(scroll_amount) >= 1:
-            pyautogui.scroll(scroll_amount, _pause=False)
+        """Handle vertical scroll from phone via Win32."""
+        # Standard Windows wheel delta is 120 per notch
+        # dy is usually small, so we scale it
+        scroll_amount = int(dy * -15)
+        if scroll_amount != 0:
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, scroll_amount, 0)
             return "TOUCH SCROLL"
         return "TOUCH READY"
 

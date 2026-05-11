@@ -9,6 +9,7 @@ let hapticsEnabled = localStorage.getItem("gesturelink_haptics") !== "false";
 
 // WebRTC State
 let peerConn: RTCPeerConnection | null = null;
+let dataChannel: RTCDataChannel | null = null;
 let myPeerId = Math.random().toString(36).substring(7);
 
 // DOM Elements
@@ -332,6 +333,10 @@ async function initWebRTC() {
     if (e.candidate) sendSignal({ type: "candidate", candidate: e.candidate });
   };
 
+  dataChannel = peerConn.createDataChannel("commands", { ordered: false, maxRetransmits: 0 });
+  dataChannel.onopen = () => console.log("WebRTC DataChannel OPEN! (0-latency mode active)");
+  dataChannel.onclose = () => dataChannel = null;
+
   const offer = await peerConn.createOffer();
   await peerConn.setLocalDescription(offer);
   sendSignal({ type: "offer", sdp: offer.sdp });
@@ -346,7 +351,7 @@ async function initWebRTC() {
           else if (data.signal.type === "candidate") await peerConn.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
         }
       } catch (e) { }
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 100)); // 100ms polling for instant handshake
     }
   })();
 }
@@ -468,9 +473,51 @@ saveAppShortcut.onclick = async () => {
 };
 
 async function startApp() {
-  addDeviceToList(location.hostname, "Hub (Primary)");
-  // @ts-ignore
-  globalThis.connectToPC(0);
+  // Get hub info to find the Local LAN IP
+  try {
+    const res = await fetch(`${location.origin}/api/hub/info`);
+    const data = await res.json();
+    
+    // 1. Add the current domain (could be ngrok)
+    addDeviceToList(location.hostname, "Hub (Cloud Tunnel)");
+    
+    // 2. Add the Local LAN IP (if different)
+    if (data.lan_ip && data.lan_ip !== location.hostname) {
+      addDeviceToList(data.lan_ip, "Hub (Local LAN)");
+    }
+
+    // AUTO-CONNECT STRATEGY:
+    // If we are on the LAN IP already, just connect.
+    // If we are on ngrok, try to "probe" the LAN IP.
+    if (data.lan_ip && location.hostname !== data.lan_ip) {
+       console.log("Probing Local LAN for zero-latency fallback...");
+       try {
+         const probe = await fetch(`https://${data.lan_ip}:${data.port}/api/ping`, { signal: AbortSignal.timeout(1000) });
+         if (probe.ok) {
+           console.log("Local LAN reached! Switching to 0-latency mode.");
+           // Find the index of the LAN device
+           const lanIdx = devices.findIndex(d => d.ip === data.lan_ip);
+           if (lanIdx !== -1) {
+             // @ts-ignore
+             globalThis.connectToPC(lanIdx);
+             return;
+           }
+         }
+       } catch (e) {
+         console.log("Local LAN not reachable (different network). Staying on Cloud Tunnel.");
+       }
+    }
+
+    // Fallback: connect to the device at index 0 (usually the current domain)
+    // @ts-ignore
+    globalThis.connectToPC(0);
+
+  } catch (e) {
+    console.error("Hybrid start failed:", e);
+    addDeviceToList(location.hostname, "Hub (Primary)");
+    // @ts-ignore
+    globalThis.connectToPC(0);
+  }
 }
 
 async function logout() {
@@ -525,9 +572,7 @@ function setupTouchpad() {
 
     if (e.touches.length === 1 && (startTime - lastTapTime) < 300) {
       isDragging = true;
-      if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'click_down', button: 'left' }));
-      }
+      sendCommand({ type: 'click_down', button: 'left' });
     }
     e.preventDefault();
   }, { passive: false });
@@ -577,18 +622,14 @@ function setupTouchpad() {
       const dy = e.touches[0].clientY - lastY;
       lastX = e.touches[0].clientX;
       lastY = e.touches[0].clientY;
-      if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
-        lastMoveTime = now;
-      }
+      sendCommand({ type: 'move', dx, dy });
+      lastMoveTime = now;
     } else if (!twoFingerStarted && e.touches.length === 1 && isDragging) {
       const dx = e.touches[0].clientX - lastX;
       const dy = e.touches[0].clientY - lastY;
       lastX = e.touches[0].clientX;
       lastY = e.touches[0].clientY;
-      if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
-      }
+      sendCommand({ type: 'move', dx, dy });
     }
     e.preventDefault();
   }, { passive: false });
@@ -660,9 +701,20 @@ function setupKeyboardToolbar() {
 }
 
 function sendHotkey(keys: string[]) {
-  if (!activePC?.ws || activePC.ws.readyState !== 1) return;
-  activePC.ws.send(JSON.stringify({ type: 'hotkey', keys }));
+  sendCommand({ type: 'hotkey', keys });
   triggerHaptic(ImpactStyle.Medium);
+}
+
+function sendCommand(data: any) {
+  const msg = JSON.stringify(data);
+  // Priority 1: WebRTC DataChannel (P2P, Zero Latency)
+  if (dataChannel && dataChannel.readyState === "open") {
+    dataChannel.send(msg);
+  } 
+  // Priority 2: Standard WebSocket (Fallback)
+  else if (activePC?.ws?.readyState === 1) {
+    activePC.ws.send(msg);
+  }
 }
 
 async function saveSettings() {

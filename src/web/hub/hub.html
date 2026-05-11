@@ -900,6 +900,12 @@
                         if (signal.type === "offer") {
                             if (peerConn) peerConn.close();
                             peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+                            peerConn.ondatachannel = e => {
+                                const dc = e.channel;
+                                dc.onmessage = msg => {
+                                    if (localWS && localWS.readyState === 1) localWS.send(msg.data);
+                                };
+                            };
                             peerConn.ontrack = e => {
                                 video.srcObject = e.streams[0];
                                 placeholder.style.display = 'none';
@@ -925,7 +931,7 @@
                         }
                     }
                 } catch (e) { }
-                await new Promise(r => setTimeout(r, 1000));
+                await new Promise(r => setTimeout(r, 100)); // 100ms polling for instant handshake
             }
         }
 

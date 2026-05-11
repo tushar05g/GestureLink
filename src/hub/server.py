@@ -26,6 +26,7 @@ import uvicorn
 import qrcode
 import socket
 import websockets
+from pyngrok import ngrok, conf
 
 from src.core.config import CONFIG
 from src.core.controller import MouseController
@@ -166,9 +167,32 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
         app.state.cleanup_task = asyncio.create_task(_cleanup_signals_loop())
         
+        # --- NGROK TUNNEL ---
+        app.state.ngrok_url = None
+        auth_token = os.getenv("NGROK_AUTH_TOKEN")
+        if auth_token:
+            try:
+                logger.info("Initializing ngrok tunnel...")
+                ngrok.set_auth_token(auth_token)
+                # If we are running with local SSL, tell ngrok to use https for the local target
+                # otherwise use http. Note: ngrok's public URL will always be https.
+                local_proto = "https" if CERT_PEM.exists() else "http"
+                # host_header="localhost" is critical for local HTTPS with self-signed certs
+                tunnel = ngrok.connect(addr=f"{local_proto}://localhost:{port}", bind_tls=True, host_header="localhost")
+                app.state.ngrok_url = tunnel.public_url
+                print(f"  * Remote Tunnel:    {app.state.ngrok_url}")
+                logger.info(f"Ngrok tunnel established: {app.state.ngrok_url}")
+            except Exception as e:
+                logger.error(f"Failed to start ngrok tunnel: {e}")
+        
         yield
         
         # Shutdown
+        if app.state.ngrok_url:
+            logger.info("Closing ngrok tunnel...")
+            ngrok.disconnect(app.state.ngrok_url)
+            ngrok.kill()
+            
         discovery.stop()
         vision_worker.stop()
         logger.info("Hub shutting down...")
@@ -271,7 +295,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
             "port": port,
-            "ngrok_url": os.getenv("NGROK_URL"),
+            "ngrok_url": app.state.ngrok_url or os.getenv("NGROK_URL"),
             "network_profile": await _get_network_profile()
         })
 
@@ -389,7 +413,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     if consecutive_failures > 30:  # ~1 second of failure
                         logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.1) # 100ms polling for faster signaling
                     continue
 
                 consecutive_failures = 0
@@ -435,7 +459,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     logger.error(f"Hub loop error: {e}")
                     _, frame_jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     hub_video_frame = frame_jpeg.tobytes()
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.01) # Reduced to ms for faster response
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")
         finally:
@@ -452,7 +476,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         logger.info(f"Toggle request: target={target}, lan_ip={lan_ip}, active={active}")
 
         # If target matches hub or is omitted, control local camera
-        is_hub = not target or target in ("localhost", "127.0.0.1", lan_ip)
+        ngrok_host = ""
+        if hasattr(app.state, "ngrok_url") and app.state.ngrok_url:
+            from urllib.parse import urlparse
+            ngrok_host = urlparse(app.state.ngrok_url).hostname
+
+        is_hub = not target or target in ("localhost", "127.0.0.1", lan_ip) or (ngrok_host and target == ngrok_host)
         
         if is_hub:
             if active and not app.state.camera_active:
@@ -484,7 +513,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     last_frame = hub_video_frame
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + hub_video_frame + b'\r\n')
-                await asyncio.sleep(0.016)  # ~60fps polling
+                await asyncio.sleep(0.01)  # Faster stream updates
         return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
     @app.get("/api/hub/camera/status")
@@ -699,14 +728,22 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         # Token validation IS the security gate.
         if not tokens.validate_token(token):
             logger.warning("WS rejected: invalid token from %s", client_ip)
+            await asyncio.sleep(0.1) # Debounced rejection
             await ws.close(code=4003)
             return
 
         await ws.accept()
         logger.info("WS accepted: client=%s", client_ip)
 
-        # AGENT RELAY LOGIC
-        if target and target != local_ip:
+        # If target matches local IP OR the ngrok hostname, it's a LOCAL path
+        ngrok_host = ""
+        if hasattr(app.state, "ngrok_url") and app.state.ngrok_url:
+            from urllib.parse import urlparse
+            ngrok_host = urlparse(app.state.ngrok_url).hostname
+
+        is_local = (target is None or target == local_ip or target == "localhost" or (ngrok_host and target == ngrok_host))
+
+        if not is_local:
             logger.info("RELAY PATH: proxying %s -> Agent %s", client_ip, target)
             agent_url = f"wss://{target}:8001/ws?token=hub_internal"
             # Create a permissive SSL context that accepts self-signed certificates.
@@ -878,7 +915,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
             "port": port,
-            "ngrok_url": os.getenv("NGROK_URL")
+            "ngrok_url": app.state.ngrok_url or os.getenv("NGROK_URL")
         }
         # Fix: assign to window.infoData so fetchUpdates() can read it across the script
         injection = f"window.infoData = {json.dumps(info)};"
