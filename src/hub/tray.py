@@ -1,6 +1,9 @@
+import multiprocessing
 import sys
 import os
-import multiprocessing
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
 
 # --- Single-Instance Mutex (Windows) ---
 # This named mutex lets the Inno Setup installer detect that the Hub is running
@@ -20,10 +23,6 @@ if sys.platform == "win32":
     except Exception:
         pass  # Non-critical — silently skip on non-Windows or import failure
 
-# CRITICAL: Fix for PyInstaller + Multiprocessing (prevent infinite loop / fork bomb)
-if __name__ == "__main__":
-    multiprocessing.freeze_support()
-
 # Fix for PyInstaller with console=False
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
@@ -33,16 +32,15 @@ if sys.stderr is None:
 import threading
 import webbrowser
 import socket
-import os
 import signal
-import sys
 from pathlib import Path
 from PIL import Image, ImageDraw
 import pystray
 from pystray import MenuItem as item
 
-from src.hub.server import build_app
-from src.hub.managers import detect_lan_ip
+# Heavy imports deferred to avoid module double-load errors in subprocesses
+# from src.hub.server import build_app
+# from src.hub.managers import detect_lan_ip
 import uvicorn
 
 def _start_shutdown_listener(on_shutdown):
@@ -117,6 +115,7 @@ class GestureLinkTray:
         self.port = 8000
         self.server_thread = None
         self.icon = None
+        from src.hub.server import build_app
         self.app = build_app(host=self.host, port=self.port)
 
     def create_icon_image(self):
@@ -150,6 +149,7 @@ class GestureLinkTray:
         webbrowser.open(f"http://localhost:{self.port}/hub")
 
     def on_copy_ip(self):
+        from src.hub.managers import detect_lan_ip
         ip = detect_lan_ip()
         try:
             import pyperclip
@@ -203,6 +203,7 @@ class GestureLinkTray:
             menu
         )
         
+        from src.hub.managers import detect_lan_ip
         print(f"GestureLink Hub running on http://{detect_lan_ip()}:{self.port}")
         print("Tray icon active. Access the dashboard via the taskbar.")
         self.icon.run()
