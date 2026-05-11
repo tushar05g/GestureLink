@@ -812,8 +812,13 @@ async function autoPair(pin: string) {
   if (pin.length !== 6) return;
   pairStatusText.textContent = "Verifying PIN…";
 
+  // Determine Hub URL: query param > local
+  const urlParams = new URLSearchParams(window.location.search);
+  const hubUrl = urlParams.get('hub') || location.origin;
+  const baseUrl = hubUrl.startsWith('http') ? hubUrl : `${location.protocol}//${hubUrl}`;
+
   try {
-    const res = await fetch(`${location.origin}/api/pair`, {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/pair`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pin, hostname: "Mobile Controller" })

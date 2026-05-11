@@ -1,71 +1,68 @@
-# GestureLink Ignores
-*.zip
-.installed
-cert.pem
-key.pem
-node_modules/
+# GestureLink Production Ignores
+# ──────────────────────────────────────────────────────────────────────────────
 
-# Python compiled files
-__pycache__/
-*.pyc
-.env
-src/hub/security.json
-src/hub/settings.json
-src/core/models/
-*.task
-cert.pem
-key.pem
-dist/
+# 🛠 Build & Distribution
 build/
 dist/
 release/
-*.egg-info/
-pip-wheel-metadata/
+*.spec
+*.manifest
+!GestureLink_Hub.spec
+!GestureLink_Agent.spec
+!GestureLink_Hub.manifest
+!GestureLink_Agent.manifest
 
-# Virtual environments
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
 venv/
 .venv/
-env/
-ENV/
-
-# PyInstaller config (Include these for reproducible builds)
-!*.manifest
-!*.spec
-
-# Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
-
-# Unit test / coverage
 .tox/
-.nox/
 .pytest_cache/
 .coverage
-.coverage.*
 htmlcov/
 
-# Jupyter
-.ipynb_checkpoints
+# 📦 Dependencies & Assets
+node_modules/
+src/web/mobile/dist/
+src/core/models/*.task
+src/core/models/hand_landmarker.task
 
-# pyenv
-.python-version
-
-# mypy
-.mypy_cache/
-
-# IDEs
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment files
+# 🔑 Security & Config (NEVER COMMIT)
 .env
 .env.*
+cert.pem
+key.pem
+*.json
+!package.json
+!tsconfig.json
+!vercel.json
+!manifest.json
+src/hub/security.json
+src/hub/settings.json
 
-# Logs and DB
+# 🛰 Binaries & Tunnels
+cloudflared.exe
+ngrok.exe
+*.exe
+
+# 📂 OS & IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
 *.log
 *.sqlite3
 *.db
+temp/
+tmp/
+scratch/
+old_files/
+"old _files"/
+zirXr68v
