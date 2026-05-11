@@ -96,6 +96,14 @@ hidden_imports = [
     "src.core.utils",
     "src.core.modal_vision",
     "src.core.modes",
+    # WebRTC
+    "aiortc",
+    "aiortc.rtp",
+    "aiortc.mediastreams",
+    "av",
+    "pyee",
+    "cryptography",
+    "google-auth"
 ]
 
 # ─── Data files to bundle ─────────────────────────────────────────────────────
@@ -114,6 +122,8 @@ datas = [
     (str(ROOT / ".env"),                                      "."),
     # Mediapipe C bindings
     (os.path.join(mediapipe_path, "tasks", "c"),              "mediapipe/tasks/c"),
+    # Cloudflared executable (if exists)
+    (str(ROOT / "cloudflared.exe"),                           ".") if (ROOT / "cloudflared.exe").exists() else (str(ROOT / ".env"), ".env_placeholder"),
 ]
 
 # ─── Analysis ─────────────────────────────────────────────────────────────────

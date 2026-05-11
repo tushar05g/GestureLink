@@ -37,6 +37,10 @@ from src.core.vision_worker import AsyncVisionWorker
 from src.core.utils import resource_path
 from src.core.modes import CanvasController, BuilderController
 
+from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc.mediastreams import MediaStreamError
+from av import VideoFrame
+
 # Checklist:
 # | 1 | Hub starts without any error. | ✅ Passed | No startup errors. |
 # | 2 | QR code and pin showing on hub UI. | ✅ Passed | Dynamic IP detection working. |
@@ -601,6 +605,78 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 app.state.camera_active = False
                 logger.info("Hub local camera turned OFF")
             return JSONResponse({"ok": True, "active": app.state.camera_active})
+    
+    # --- WebRTC Low Latency Hub ---
+    pcs = set()
+
+    class HubVideoStreamTrack(VideoStreamTrack):
+        def __init__(self):
+            super().__init__()
+            self._frame_count = 0
+
+        async def recv(self):
+            global hub_video_frame
+            if not hub_video_frame:
+                # Wait for a frame or return a black/placeholder frame to keep the stream alive
+                await asyncio.sleep(0.1)
+                # In a real scenario, we might want to throw a specific error or send a blank frame
+                # For now, just wait.
+                return await self.recv()
+            
+            # Convert bytes to VideoFrame
+            from PIL import Image
+            import numpy as np
+            
+            img = Image.open(io.BytesIO(hub_video_frame)).convert("RGB")
+            frame = VideoFrame.from_image(img)
+            frame.pts = self._frame_count
+            frame.time_base = 1 / 30
+            self._frame_count += 1
+            
+            # Throttle to ~30fps to save bandwidth
+            await asyncio.sleep(1/30)
+            return frame
+
+    @app.post("/api/webrtc/offer")
+    async def webrtc_offer(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
+        pc = RTCPeerConnection()
+        pcs.add(pc)
+
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            if pc.connectionState == "failed" or pc.connectionState == "closed":
+                await pc.close()
+                pcs.discard(pc)
+
+        # Handle Data Channel for Gestures
+        @pc.on("datachannel")
+        def on_datachannel(channel):
+            class ChannelResponder:
+                def __init__(self, ch): self.ch = ch
+                async def send_json(self, data):
+                    if self.ch.readyState == "open":
+                        self.ch.send(json.dumps(data))
+            
+            responder = ChannelResponder(channel)
+            @channel.on("message")
+            async def on_message(message):
+                if isinstance(message, str):
+                    try:
+                        await _handle_ws_message(responder, {"text": message}, None, mouse)
+                    except: pass
+
+        # Add Video Track
+        pc.addTrack(HubVideoStreamTrack())
+
+        await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+
+        return JSONResponse({
+            "sdp": pc.localDescription.sdp,
+            "type": pc.localDescription.type
+        })
         
         # Otherwise proxy to agent
         try:
@@ -958,7 +1034,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         pass
                 asyncio.create_task(check_shutdown())
 
-    async def _handle_vision_frame(ws, frame_bytes, vision, mouse):
+    async def _handle_vision_frame(responder, frame_bytes, vision, mouse):
         # AsyncVisionWorker handles the queue and process management
         result = await vision.process_frame(frame_bytes)
         if result:
@@ -966,10 +1042,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             if state:
                 status = mouse.update(state)
                 try:
-                    await ws.send_json({"status": status, "type": "gesture"})
+                    await responder.send_json({"status": status, "type": "gesture"})
                 except: pass
 
-    async def _handle_ws_message(ws, msg, vision, mouse):
+    async def _handle_ws_message(responder, msg, vision, mouse):
         try:
             data = json.loads(msg["text"])
             mtype = data.get("type")
@@ -979,30 +1055,30 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 # No response needed for high-frequency moves
             elif mtype == "click":
                 res = mouse.handle_click(data.get("button", "left"))
-                await ws.send_json({"status": res})
+                if responder: await responder.send_json({"status": res})
             elif mtype in ("click_down", "click_up"):
                 is_down = (mtype == "click_down")
                 res = mouse.handle_click_state(data.get("button", "left"), is_down)
-                await ws.send_json({"status": res})
+                if responder: await responder.send_json({"status": res})
             elif mtype == "scroll":
                 res = mouse.handle_touch_scroll(float(data.get("dy", 0)))
-                await ws.send_json({"status": res})
+                if responder: await responder.send_json({"status": res})
             elif mtype == "zoom":
                 res = mouse.handle_touch_zoom(float(data.get("delta", 0)))
-                await ws.send_json({"status": res})
+                if responder: await responder.send_json({"status": res})
             elif mtype == "shortcut":
                 res = mouse.handle_touch_shortcut(data.get("slot", ""))
-                await ws.send_json({"status": res})
+                if responder: await responder.send_json({"status": res})
             elif mtype == "key":
                 key = data.get("key")
                 if key:
                     res = mouse.handle_key(key)
-                    await ws.send_json({"status": res})
+                    if responder: await responder.send_json({"status": res})
             elif mtype == "hotkey":
                 keys = data.get("keys", [])
                 if keys:
                     res = mouse.handle_hotkey(keys)
-                    await ws.send_json({"status": res})
+                    if responder: await responder.send_json({"status": res})
         except Exception as e:
             logger.error("WS Message Error: %s", e)
 
@@ -1051,8 +1127,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         return HTMLResponse(content)
 
     @app.get("/lan-qr.png")
-    async def qr_gen(url: Optional[str] = None) -> StreamingResponse:
+    async def qr_gen(url: Optional[str] = None, pin: Optional[str] = None) -> StreamingResponse:
         frontend_base = os.getenv("FRONTEND_URL")
+        logger.info(f"QR Request - FRONTEND_URL: {frontend_base}")
         
         if url:
             target = url
@@ -1069,7 +1146,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             proto = "https" if CERT_PEM.exists() else "http"
             target = f"{proto}://{detect_lan_ip()}:{port}"
             
-        logger.info(f"Generating QR for target: {target}")
+        if pin:
+            target += ("&" if "?" in target else "?") + f"pin={pin}"
+            
+        logger.info(f"QR Final Target: {target}")
         qr = qrcode.make(target)
         buf = io.BytesIO()
         try:

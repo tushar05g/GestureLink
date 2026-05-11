@@ -646,10 +646,8 @@
                     netWarn.style.display = 'none';
                 }
 
-                const proto = window.location.protocol;
-                const currentUrl = data.ngrok_url || `${proto}//${data.lan_ip}:${data.port}`;
-                // Issue 4: QR points to base URL only
-                document.getElementById('qr-img').src = `/lan-qr.png?url=${encodeURIComponent(currentUrl)}`;
+                // Let backend decide the best URL (Prioritizes FRONTEND_URL > Tunnel > LAN)
+                document.getElementById('qr-img').src = `/lan-qr.png?pin=${data.pin}`;
 
                 // Pending pairing requests
                 const secRes = await fetch('/api/security/pending');

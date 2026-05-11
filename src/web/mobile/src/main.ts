@@ -92,6 +92,9 @@ async function init() {
 
   // Camera toggle
   const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
+  const hubVideoContainer = document.getElementById("hubVideoContainer")!;
+  const hubVideoPlayer = document.getElementById("hubVideoPlayer") as HTMLVideoElement;
+
   pcCameraToggle?.addEventListener('change', async (e: any) => {
     if (!activePC) {
       alert("Connect to a PC first!");
@@ -107,12 +110,53 @@ async function init() {
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
+      
+      if (active) {
+        hubVideoContainer.style.display = 'block';
+        setupHubWebRTC();
+      } else {
+        hubVideoContainer.style.display = 'none';
+        closeWebRTC();
+      }
+
       if (remoteGestureStatus) remoteGestureStatus.textContent = active ? "CAMERA ON" : "CAMERA OFF";
     } catch (err) {
       alert(`Failed to toggle camera: ${err}`);
       pcCameraToggle.checked = !e.target.checked;
     }
   });
+
+  async function setupHubWebRTC() {
+    closeWebRTC(); // Reset
+    peerConn = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+
+    dataChannel = peerConn.createDataChannel("gestures", { ordered: false });
+    
+    peerConn.ontrack = (event) => {
+        hubVideoPlayer.srcObject = event.streams[0];
+    };
+
+    const offer = await peerConn.createOffer();
+    await peerConn.setLocalDescription(offer);
+
+    const res = await fetch(`${location.origin}/api/webrtc/offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sdp: peerConn.localDescription?.sdp, type: peerConn.localDescription?.type })
+    });
+    const answer = await res.json();
+    await peerConn.setRemoteDescription(new RTCSessionDescription(answer));
+  }
+
+  function closeWebRTC() {
+    if (peerConn) {
+        peerConn.close();
+        peerConn = null;
+        dataChannel = null;
+    }
+  }
 
   // Vision Mode Buttons
   const modeBtns = document.querySelectorAll(".mode-btn");
@@ -606,13 +650,13 @@ function setupTouchpad() {
 
       if (Math.abs(pinchDelta) > 8) {
         if (activePC?.ws?.readyState === 1) {
-          activePC.ws.send(JSON.stringify({ type: 'zoom', delta: pinchDelta }));
+          sendCommand({ type: 'zoom', delta: pinchDelta });
         }
         lastPinchDist = currentDist;
       } else {
         const scrollDy = currentMidY - twoFingerMidY;
         if (Math.abs(scrollDy) > 2 && activePC?.ws?.readyState === 1) {
-          activePC.ws.send(JSON.stringify({ type: 'scroll', dy: scrollDy * -1.5 }));
+          sendCommand({ type: 'scroll', dy: scrollDy * -1.5 });
         }
       }
       twoFingerMidY = currentMidY;
@@ -649,18 +693,18 @@ function setupTouchpad() {
     if (isDragging) {
       isDragging = false;
       if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'click_up', button: 'left' }));
+        sendCommand({ type: 'click_up', button: 'left' });
       }
     } else if (duration < 250 && !isMoving) {
       if (activePC?.ws?.readyState === 1 && maxFingers < 3) {
         const button = maxFingers === 2 ? 'right' : 'left';
-        activePC.ws.send(JSON.stringify({ type: 'click', button }));
+        sendCommand({ type: 'click', button });
         triggerHaptic(maxFingers === 2 ? ImpactStyle.Medium : ImpactStyle.Light);
       }
       lastTapTime = now;
     } else if (duration >= 1000 && !isMoving) {
       if (activePC?.ws?.readyState === 1 && (maxFingers === 3 || maxFingers === 4)) {
-        activePC.ws.send(JSON.stringify({ type: 'shortcut', slot: `touch_${maxFingers}_finger` }));
+        sendCommand({ type: 'shortcut', slot: `touch_${maxFingers}_finger` });
         triggerHaptic(ImpactStyle.Heavy);
       }
     } else {
@@ -691,7 +735,7 @@ function setupKeyboardToolbar() {
   keyboardInput.addEventListener('keydown', (e) => {
     if (!activePC?.ws || activePC.ws.readyState !== 1) return;
     if (["Backspace", "Enter", "Tab", "Escape"].includes(e.key)) {
-      activePC.ws.send(JSON.stringify({ type: 'key', key: e.key }));
+      sendCommand({ type: 'key', key: e.key });
       e.preventDefault();
     }
   });
@@ -700,7 +744,7 @@ function setupKeyboardToolbar() {
     if (!activePC?.ws || activePC.ws.readyState !== 1) return;
     const val = keyboardInput.value;
     if (val.length > 0) {
-      activePC.ws.send(JSON.stringify({ type: 'key', key: val }));
+      sendCommand({ type: 'key', key: val });
       keyboardInput.value = '';
     }
   });
