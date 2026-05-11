@@ -54,7 +54,6 @@ hidden_imports = [
     "anyio._backends._trio",
     # Mediapipe
     "mediapipe",
-    "mediapipe.python._framework_bindings",
     "mediapipe.tasks",
     "mediapipe.tasks.c",
     "mediapipe.tasks.python",
@@ -73,6 +72,7 @@ hidden_imports = [
     "zeroconf._utils",
     "zeroconf._utils.ipaddress",
     "zeroconf._handlers",
+    "zeroconf._handlers.answers",
     "websockets",
     "websockets.legacy",
     "websockets.legacy.server",
@@ -99,11 +99,19 @@ hidden_imports = [
     # WebRTC
     "aiortc",
     "aiortc.rtp",
+    "aiortc.rtcrtpsender",
+    "aiortc.rtcrtpreceiver",
+    "aiortc.rtcdatachannel",
+    "aiortc.rtcsessiondescription",
+    "aiortc.rtcicetransport",
+    "aiortc.rtcdtlstransport",
+    "aiortc.rtcsctptransport",
+    "aiortc.stats",
+    "aiortc.codecs",
     "aiortc.mediastreams",
     "av",
     "pyee",
-    "cryptography",
-    "google-auth"
+    "cryptography"
 ]
 
 # ─── Data files to bundle ─────────────────────────────────────────────────────

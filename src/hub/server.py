@@ -26,16 +26,13 @@ import uvicorn
 import qrcode
 import socket
 import websockets
-from pyngrok import ngrok, conf
+# from pyngrok import ngrok, conf
 
-from src.core.config import CONFIG
-from src.core.controller import MouseController
-from src.core.shortcuts import ShortcutManager
-from src.core.vision import VisionProcessor, Gesture
-from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
-from src.core.vision_worker import AsyncVisionWorker
+# Heavy imports deferred to avoid module double-load errors in subprocesses
+# from src.core.controller import MouseController
+# from src.core.vision import VisionProcessor
+# from src.core.vision_worker import AsyncVisionWorker
 from src.core.utils import resource_path
-from src.core.modes import CanvasController, BuilderController
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.mediastreams import MediaStreamError
@@ -116,6 +113,14 @@ def _load_settings() -> None:
             logger.error("Failed to load settings: %s", e)
 
 def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
+    from src.core.config import CONFIG
+    from src.core.controller import MouseController
+    from src.core.shortcuts import ShortcutManager
+    from src.core.vision import VisionProcessor, Gesture
+    from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
+    from src.core.vision_worker import AsyncVisionWorker
+    from src.core.modes import CanvasController, BuilderController
+
     def _open_dashboard():
         import webbrowser, subprocess, os, time
         # Give the tunnel 3 seconds to establish
@@ -200,14 +205,21 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             cmd = p
                             break
 
-                # Quick Tunnel (trycloudflare.com)
-                local_proto = "https" if os.path.exists(os.path.join(os.getcwd(), "cert.pem")) else "http"
-                print(f"  * Attempting Cloudflare Tunnel with: {cmd}")
-                
-                # If using HTTPS locally, we must tell cloudflared to ignore self-signed cert errors
-                tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://localhost:{port}"]
-                if local_proto == "https":
-                    tunnel_args.append("--no-tls-verify")
+                # Custom Domain support: Use Token if provided in .env
+                cf_token = os.getenv("CLOUDFLARE_TOKEN")
+                if cf_token:
+                    print(f"  * Starting Persistent Tunnel with Token...")
+                    tunnel_args = [cmd, "tunnel", "--no-autoupdate", "run", "--token", cf_token]
+                    # In token mode, the URL is fixed in the CF Dashboard (e.g. hub.yourdomain.com)
+                    # so we don't need to parse the log for a new URL.
+                    app.state.cloudflare_url = os.getenv("HUB_URL") # User should set this in .env
+                else:
+                    # Quick Tunnel (trycloudflare.com)
+                    local_proto = "https" if CERT_PEM.exists() else "http"
+                    print(f"  * Attempting Quick Tunnel with: {cmd}")
+                    tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://localhost:{port}"]
+                    if local_proto == "https":
+                        tunnel_args.append("--no-tls-verify")
 
                 proc = subprocess.Popen(
                     tunnel_args,
@@ -215,12 +227,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                 )
                 app.state.cf_proc = proc
-                for line in iter(proc.stdout.readline, ""):
-                    match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
-                    if match:
-                        app.state.cloudflare_url = match.group(0)
-                        logger.info("Cloudflare Tunnel active: %s", app.state.cloudflare_url)
-                        break
+                
+                if not cf_token:
+                    for line in iter(proc.stdout.readline, ""):
+                        match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                        if match:
+                            app.state.cloudflare_url = match.group(0)
+                            logger.info("Cloudflare Tunnel active: %s", app.state.cloudflare_url)
+                            break
             except Exception as e:
                 print(f"  ! Cloudflare Error: {e}")
                 logger.error("Cloudflare Tunnel failed: %s", e)
@@ -259,31 +273,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         app.state.cleanup_task = asyncio.create_task(_cleanup_signals_loop())
         
         
-        # --- NGROK TUNNEL ---
-        app.state.ngrok_url = None
-        auth_token = os.getenv("NGROK_AUTH_TOKEN")
-        if auth_token:
-            try:
-                logger.info("Initializing ngrok tunnel...")
-                ngrok.set_auth_token(auth_token)
-                # If we are running with local SSL, tell ngrok to use https for the local target
-                # otherwise use http. Note: ngrok's public URL will always be https.
-                local_proto = "https" if CERT_PEM.exists() else "http"
-                # host_header="localhost" is critical for local HTTPS with self-signed certs
-                tunnel = ngrok.connect(addr=f"{local_proto}://localhost:{port}", bind_tls=True, host_header="localhost")
-                app.state.ngrok_url = tunnel.public_url
-                print(f"  * Remote Tunnel:    {app.state.ngrok_url}")
-                logger.info(f"Ngrok tunnel established: {app.state.ngrok_url}")
-            except Exception as e:
-                logger.error(f"Failed to start ngrok tunnel: {e}")
+        # --- NGROK TUNNEL REMOVED ---
         
         yield
         
         # Shutdown
-        if app.state.ngrok_url:
-            logger.info("Closing ngrok tunnel...")
-            ngrok.disconnect(app.state.ngrok_url)
-            ngrok.kill()
+        # if app.state.ngrok_url:
+        #     logger.info("Closing ngrok tunnel...")
+        #     ngrok.disconnect(app.state.ngrok_url)
+        #     ngrok.kill()
             
         if hasattr(app.state, "cf_proc"):
             logger.info("Closing Cloudflare tunnel...")

@@ -755,15 +755,16 @@ function sendHotkey(keys: string[]) {
   triggerHaptic(ImpactStyle.Medium);
 }
 
-function sendCommand(data: any) {
-  const msg = JSON.stringify(data);
-  // Priority 1: WebRTC DataChannel (P2P, Zero Latency)
-  if (dataChannel && dataChannel.readyState === "open") {
-    dataChannel.send(msg);
-  } 
-  // Priority 2: Standard WebSocket (Fallback)
-  else if (activePC?.ws?.readyState === 1) {
-    activePC.ws.send(msg);
+function sendCommand(cmd: any) {
+  // 🚀 Use WebRTC DataChannel for ultra-low latency if available
+  if (activePC?.dc && activePC.dc.readyState === 'open') {
+    activePC.dc.send(JSON.stringify(cmd));
+    return;
+  }
+  
+  // 🛡️ Fallback to WebSocket if WebRTC is still connecting or not supported
+  if (activePC?.ws?.readyState === 1) {
+    activePC.ws.send(JSON.stringify(cmd));
   }
 }
 
