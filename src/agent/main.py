@@ -207,6 +207,10 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
     frac_x = 0.0
     frac_y = 0.0
     
+    global mouse
+    if mouse is None:
+        mouse = MouseController(CONFIG, responsive=True)
+    
     try:
         while True:
             msg = await ws.receive()
@@ -216,28 +220,19 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
                     mtype = data.get("type")
                     if mtype in ("touch", "move"):
                         dx, dy = float(data.get("dx", 0)), float(data.get("dy", 0))
-                        
-                        # Accumulate the fractional movements
                         frac_x += dx * CONFIG.gesture.trackpad_sensitivity
                         frac_y += dy * CONFIG.gesture.trackpad_sensitivity
-                        
-                        move_x = int(frac_x)
-                        move_y = int(frac_y)
-                        
-                        # Only deduct what was actually moved
+                        move_x, move_y = int(frac_x), int(frac_y)
                         frac_x -= move_x
                         frac_y -= move_y
-                        
                         if move_x != 0 or move_y != 0:
                             pyautogui.moveRel(move_x, move_y, _pause=False)
                     elif mtype == "click":
                         pyautogui.click(button=data.get("button", "left"), _pause=False)
                     elif mtype in ("click_down", "click_up"):
                         is_down = (mtype == "click_down")
-                        if is_down:
-                            pyautogui.mouseDown(button=data.get("button", "left"), _pause=False)
-                        else:
-                            pyautogui.mouseUp(button=data.get("button", "left"), _pause=False)
+                        if is_down: pyautogui.mouseDown(button=data.get("button", "left"), _pause=False)
+                        else: pyautogui.mouseUp(button=data.get("button", "left"), _pause=False)
                     elif mtype == "scroll":
                         dy = float(data.get("dy", 0))
                         pyautogui.scroll(int(dy * -2), _pause=False)
@@ -249,13 +244,13 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
                         pyautogui.keyUp('ctrl')
                     elif mtype == "shortcut":
                         slot = data.get("slot", "")
-                        from src.core.shortcuts import ShortcutManager
-                        sm = ShortcutManager()
-                        logic_slot = {
-                            "touch_3_finger": "three_fingers",
-                            "touch_4_finger": "four_fingers"
-                        }.get(slot, slot)
-                        sm.trigger(logic_slot)
+                        mouse.handle_touch_shortcut(slot)
+                    elif mtype == "key":
+                        key = data.get("key")
+                        if key: mouse.handle_key(key)
+                    elif mtype == "hotkey":
+                        keys = data.get("keys", [])
+                        if keys: mouse.handle_hotkey(keys)
                 except Exception as e:
                     logging.warning(f"Error processing command: {e}")
     except WebSocketDisconnect:

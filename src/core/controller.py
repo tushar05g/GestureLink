@@ -13,6 +13,8 @@ import logging
 from enum import Enum, auto
 
 import pyautogui
+import pyperclip
+import threading
 
 from src.core.vision import Gesture, GestureState
 from src.core.shortcuts import ShortcutManager
@@ -326,3 +328,43 @@ class MouseController:
 
         result = self.shortcuts.trigger(logic_slot)
         return f"TOUCH SHORTCUT {slot}: {result}"
+
+    def handle_key(self, key: str) -> str:
+        """Handle individual keystrokes, including Unicode/Emojis."""
+        try:
+            # Special keys that PyAutoGUI can handle directly
+            special_keys = {
+                "Backspace": "backspace",
+                "Enter": "enter",
+                "Tab": "tab",
+                "Escape": "esc"
+            }
+            
+            if key in special_keys:
+                pyautogui.press(special_keys[key])
+                return f"KEY PRESS: {key}"
+            
+            # For everything else (especially Unicode/Emojis), use Clipboard Injection
+            # This is much more reliable than pyautogui.typewrite on Windows
+            old_clip = pyperclip.paste()
+            pyperclip.copy(key)
+            pyautogui.hotkey('ctrl', 'v')
+            
+            # Restore clipboard in a background thread so we don't block the UI
+            def restore():
+                time.sleep(0.5) # Wait for the paste to complete
+                pyperclip.copy(old_clip)
+            
+            threading.Thread(target=restore, daemon=True).start()
+            return f"KEY TYPE: {key}"
+            
+        except Exception as e:
+            return f"KEY ERROR: {e}"
+
+    def handle_hotkey(self, keys: list) -> str:
+        """Handle multi-key combinations (e.g. ['ctrl', 'c'])."""
+        try:
+            pyautogui.hotkey(*keys)
+            return f"HOTKEY: {'+'.join(keys)}"
+        except Exception as e:
+            return f"HOTKEY ERROR: {e}"

@@ -71,7 +71,6 @@ APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
 
 # Use resource_path() so these resolve correctly inside a PyInstaller .exe
-CLIENT_HTML  = resource_path("src/web/client/remote_client.html")
 HUB_HTML     = resource_path("src/web/hub/hub.html")
 MOBILE_DIST  = resource_path("src/web/mobile/dist")
 SETTINGS_FILE = HUB_DIR / "settings.json"
@@ -799,7 +798,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     await asyncio.sleep(1.5)
                     if active_hub_dashboards <= 0:
                         logger.info("Local dashboard closed. Shutting down Hub...")
-                        os._exit(0)
+                        # os._exit(0)
+                        pass
                 asyncio.create_task(check_shutdown())
 
     async def _handle_vision_frame(ws, frame_bytes, vision, mouse):
@@ -837,6 +837,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             elif mtype == "shortcut":
                 res = mouse.handle_touch_shortcut(data.get("slot", ""))
                 await ws.send_json({"status": res})
+            elif mtype == "key":
+                key = data.get("key")
+                if key:
+                    res = mouse.handle_key(key)
+                    await ws.send_json({"status": res})
+            elif mtype == "hotkey":
+                keys = data.get("keys", [])
+                if keys:
+                    res = mouse.handle_hotkey(keys)
+                    await ws.send_json({"status": res})
         except Exception as e:
             logger.error("WS Message Error: %s", e)
 
@@ -844,7 +854,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     if MOBILE_DIST.exists():
         app.mount("/assets", StaticFiles(directory=str(MOBILE_DIST / "assets")), name="assets")
         @app.get("/")
-        async def index(): return FileResponse(MOBILE_DIST / "index.html")
+        async def index():
+            return FileResponse(MOBILE_DIST / "index.html")
+
         @app.get("/manifest.json")
         async def manifest(): return FileResponse(MOBILE_DIST / "manifest.json")
         @app.get("/sw.js")
@@ -854,15 +866,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         @app.get("/icon-512.png")
         async def icon512(): return FileResponse(MOBILE_DIST / "icon-512.png")
     
-    @app.get("/remote.html")
-    async def remote_page():
-        return FileResponse(CLIENT_HTML)
-
     @app.get("/mobile.html")
     async def mobile_page_alias():
-        if (MOBILE_DIST / "index.html").exists():
-            return FileResponse(MOBILE_DIST / "index.html")
-        return FileResponse(CLIENT_HTML) # Fallback
+        return FileResponse(MOBILE_DIST / "index.html")
     
     @app.get("/hub")
     async def hub_page():
