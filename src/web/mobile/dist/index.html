@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
@@ -8,45 +9,83 @@
   <meta name="theme-color" content="#03070c">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.2/css/all.min.css">
   <style>
     :root {
       --bg: #03070c;
+      --bg-elevated: #070d14;
       --surface: rgba(255, 255, 255, 0.04);
       --surface-hover: rgba(255, 255, 255, 0.08);
+      --surface-active: rgba(255, 255, 255, 0.12);
       --accent: #00ff95;
+      --accent-dim: #00cc78;
       --accent-glow: rgba(0, 255, 149, 0.3);
+      --accent-glow-soft: rgba(0, 255, 149, 0.12);
       --text-primary: #ffffff;
-      --text-secondary: #94a3b8;
-      --border: rgba(255, 255, 255, 0.08);
-      --glass: rgba(255, 255, 255, 0.02);
+      --text-secondary: #7a8fa8;
+      --text-tertiary: #3d5166;
+      --border: rgba(255, 255, 255, 0.07);
+      --border-accent: rgba(0, 255, 149, 0.25);
+      --glass: rgba(255, 255, 255, 0.025);
+      --danger: #ff3b5c;
+      --danger-glow: rgba(255, 59, 92, 0.2);
+      --radius-sm: 10px;
+      --radius-md: 16px;
+      --radius-lg: 22px;
+      --radius-xl: 28px;
+      --nav-height: 76px;
+      --header-height: 60px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
 
-    * {
+    *,
+    *::before,
+    *::after {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
       -webkit-tap-highlight-color: transparent;
     }
 
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+    }
+
     body {
       font-family: 'Outfit', sans-serif;
       background: var(--bg);
       color: var(--text-primary);
-      height: 100vh;
-      overflow: hidden;
       user-select: none;
-      background-image: radial-gradient(circle at 50% 50%, rgba(0, 255, 149, 0.03) 0%, transparent 100%);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Ambient background gradient */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 40% at 50% 0%, rgba(0, 255, 149, 0.04) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 30% at 80% 80%, rgba(0, 180, 255, 0.02) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
     }
 
     #app {
       display: flex;
       flex-direction: column;
       height: 100vh;
+      height: 100dvh;
+      position: relative;
+      z-index: 1;
     }
 
-    /* Onboarding Overlay */
+    /* ================================
+       ONBOARDING / PAIRING OVERLAY
+    ================================ */
     .overlay {
       position: fixed;
       inset: 0;
@@ -56,77 +95,320 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 40px;
+      padding: 32px 28px;
       text-align: center;
-      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .overlay.hidden {
       opacity: 0;
       pointer-events: none;
-      transform: translateY(-20px);
+      transform: scale(0.96) translateY(-12px);
+    }
+
+    /* Logo */
+    .logo-wrap {
+      position: relative;
+      margin-bottom: 36px;
     }
 
     .logo-pulse {
-      width: 80px;
-      height: 80px;
-      background: var(--accent);
-      border-radius: 20px;
-      margin-bottom: 32px;
-      box-shadow: 0 0 40px var(--accent-glow);
+      width: 84px;
+      height: 84px;
+      background: linear-gradient(135deg, #00ff95, #00cc78);
+      border-radius: 24px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 2rem;
+      font-size: 2.2rem;
       color: #000;
       font-weight: 800;
-      animation: pulse 2s infinite;
+      box-shadow: 0 0 0 0 var(--accent-glow);
+      animation: logoPulse 2.4s ease-in-out infinite;
+      position: relative;
+      z-index: 1;
     }
 
-    @keyframes pulse {
-      0% { transform: scale(1); box-shadow: 0 0 20px var(--accent-glow); }
-      50% { transform: scale(1.05); box-shadow: 0 0 50px var(--accent-glow); }
-      100% { transform: scale(1); box-shadow: 0 0 20px var(--accent-glow); }
+    .logo-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: 32px;
+      border: 1px solid rgba(0, 255, 149, 0.2);
+      animation: ringExpand 2.4s ease-in-out infinite;
     }
 
+    .logo-ring-2 {
+      position: absolute;
+      inset: -16px;
+      border-radius: 38px;
+      border: 1px solid rgba(0, 255, 149, 0.08);
+      animation: ringExpand 2.4s ease-in-out infinite 0.4s;
+    }
+
+    @keyframes logoPulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 24px var(--accent-glow), 0 8px 32px rgba(0, 0, 0, 0.4);
+      }
+
+      50% {
+        box-shadow: 0 0 52px var(--accent-glow), 0 8px 32px rgba(0, 0, 0, 0.4);
+      }
+    }
+
+    @keyframes ringExpand {
+
+      0%,
+      100% {
+        transform: scale(1);
+        opacity: 0.6;
+      }
+
+      50% {
+        transform: scale(1.06);
+        opacity: 0.2;
+      }
+    }
+
+    .overlay h2 {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #fff 60%, rgba(255, 255, 255, 0.6));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .overlay p {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
+    /* PIN Input */
     .pin-input-group {
       display: flex;
-      gap: 8px;
-      margin: 32px 0;
+      gap: 9px;
+      margin: 32px 0 8px;
     }
 
     .pin-box {
-      width: 45px;
-      height: 60px;
+      width: 44px;
+      height: 56px;
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      font-size: 1.5rem;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-md);
+      font-size: 1.4rem;
       font-weight: 800;
       color: var(--accent);
       text-align: center;
-      line-height: 60px;
+      line-height: 56px;
       outline: none;
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+      caret-color: var(--accent);
+      font-family: inherit;
+      /* Hide number spinners */
+      -moz-appearance: textfield;
+    }
+
+    .pin-box::-webkit-inner-spin-button,
+    .pin-box::-webkit-outer-spin-button {
+      -webkit-appearance: none;
     }
 
     .pin-box:focus {
       border-color: var(--accent);
-      background: var(--surface-hover);
+      background: rgba(0, 255, 149, 0.06);
+      box-shadow: 0 0 0 3px rgba(0, 255, 149, 0.12);
     }
 
-    /* Header */
+    /* Pair Status & Error */
+    #pairStatusText {
+      font-size: 0.82rem;
+      color: var(--accent);
+      font-weight: 600;
+      min-height: 1.4em;
+      margin-top: 12px;
+      letter-spacing: 0.02em;
+    }
+
+    #pairError {
+      color: var(--danger);
+      font-size: 0.8rem;
+      margin-top: 8px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    /* ================================
+       MODAL
+    ================================ */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 900;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding-bottom: var(--safe-bottom);
+      animation: modalFadeIn 0.25s ease-out;
+    }
+
+    @keyframes modalFadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    .modal-card {
+      background: #0d1520;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+      padding: 28px 24px 36px;
+      width: 100%;
+      max-width: 480px;
+      animation: modalSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes modalSlideUp {
+      from {
+        transform: translateY(100%);
+      }
+
+      to {
+        transform: translateY(0);
+      }
+    }
+
+    .modal-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 99px;
+      margin: 0 auto 24px;
+    }
+
+    .modal-card h3 {
+      font-size: 1.15rem;
+      font-weight: 800;
+      margin-bottom: 20px;
+      letter-spacing: -0.01em;
+    }
+
+    .modal-card label {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    .modal-card select,
+    .modal-card input[type="text"] {
+      width: 100%;
+      padding: 13px 16px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    .modal-card select:focus,
+    .modal-card input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow-soft);
+    }
+
+    .modal-card select option {
+      background: #0d1520;
+    }
+
+    .modal-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 16px 0;
+      color: var(--text-tertiary);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .modal-divider::before,
+    .modal-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ================================
+       HEADER
+    ================================ */
     header {
-      padding: 16px 20px;
+      height: var(--header-height);
+      padding: 0 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid var(--border);
+      background: rgba(3, 7, 12, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      flex-shrink: 0;
+      position: relative;
+      z-index: 10;
+    }
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-logo-icon {
+      width: 30px;
+      height: 30px;
+      background: linear-gradient(135deg, #00ff95, #00cc78);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      color: #000;
+      font-weight: 800;
     }
 
     header h1 {
-      font-size: 1.15rem;
+      font-size: 1.05rem;
       font-weight: 800;
-      color: var(--accent);
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
     }
 
     .header-right {
@@ -136,414 +418,987 @@
     }
 
     .disconnect-btn {
-      padding: 5px 12px;
-      font-size: 0.7rem;
+      padding: 6px 13px;
+      font-size: 0.68rem;
       font-weight: 700;
-      color: #ff4757;
-      background: rgba(255, 71, 87, 0.08);
-      border: 1px solid rgba(255, 71, 87, 0.2);
-      border-radius: 20px;
+      color: var(--danger);
+      background: rgba(255, 59, 92, 0.08);
+      border: 1px solid rgba(255, 59, 92, 0.2);
+      border-radius: 99px;
       cursor: pointer;
       font-family: inherit;
       transition: all 0.2s;
       display: none;
+      letter-spacing: 0.02em;
     }
-    .disconnect-btn.visible { display: block; }
-    .disconnect-btn:hover { background: rgba(255, 71, 87, 0.18); border-color: #ff4757; }
+
+    .disconnect-btn.visible {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .disconnect-btn:active {
+      background: rgba(255, 59, 92, 0.18);
+      border-color: var(--danger);
+      transform: scale(0.96);
+    }
 
     .conn-status {
-      padding: 4px 12px;
+      padding: 5px 12px;
       background: var(--surface);
-      border-radius: 20px;
-      font-size: 0.7rem;
+      border-radius: 99px;
+      font-size: 0.65rem;
       font-weight: 800;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.08em;
       border: 1px solid var(--border);
+      color: var(--text-secondary);
+      transition: all 0.3s;
     }
 
     .conn-status.online {
       color: var(--accent);
-      border-color: rgba(0, 255, 149, 0.2);
+      border-color: var(--border-accent);
+      background: rgba(0, 255, 149, 0.06);
     }
 
-    /* Tabs */
+    /* ================================
+       MAIN & TABS
+    ================================ */
     main {
       flex: 1;
       overflow-y: auto;
-      padding: 0 20px 100px;
+      overflow-x: hidden;
+      padding: 16px 16px calc(var(--nav-height) + 16px + var(--safe-bottom));
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+
+    main::-webkit-scrollbar {
+      display: none;
     }
 
     .tab-content {
       display: none;
-      animation: fadeIn 0.3s ease-out;
+      animation: tabFadeIn 0.25s ease-out;
     }
 
     .tab-content.active {
       display: block;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
+    @keyframes tabFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
+    /* Section label above cards */
+    .section-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 0 4px;
+      margin: 20px 0 10px;
+    }
+
+    /* ================================
+       CARDS
+    ================================ */
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 24px;
-      padding: 20px;
-      margin-bottom: 20px;
-      backdrop-filter: blur(10px);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      margin-bottom: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
     }
 
     .card-title {
-      font-size: 0.85rem;
+      font-size: 0.75rem;
       font-weight: 700;
       color: var(--text-secondary);
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 16px;
+      letter-spacing: 0.09em;
+      margin-bottom: 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
-    /* Video & Trackpad */
-    .video-wrap {
-      width: 100%;
-      aspect-ratio: 4/3;
-      background: #000;
-      border-radius: 16px;
-      overflow: hidden;
+    /* Info banner inside card */
+    .info-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: rgba(0, 255, 149, 0.04);
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(0, 255, 149, 0.1);
+    }
+
+    .info-banner-icon {
+      font-size: 1.3rem;
+      color: var(--accent);
+      flex-shrink: 0;
+      opacity: 0.8;
+    }
+
+    .info-banner-text {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* ================================
+       MODE SELECTOR
+    ================================ */
+    .mode-selector {
+      display: flex;
+      gap: 8px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 12px 6px;
+      border-radius: var(--radius-md);
+      border: 1.5px solid var(--border);
+      background: var(--glass);
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 0.7rem;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       position: relative;
+      overflow: hidden;
     }
 
-    #video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
+    .mode-btn:active {
+      transform: scale(0.95);
     }
 
+    .mode-btn.active {
+      background: rgba(0, 255, 149, 0.1);
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 16px rgba(0, 255, 149, 0.15), inset 0 1px 0 rgba(0, 255, 149, 0.1);
+    }
+
+    /* ================================
+       TOUCH PAD
+    ================================ */
     .touch-pad {
       width: 100%;
-      height: 240px;
+      height: 260px;
       background: var(--glass);
-      border: 1px dashed var(--border);
-      border-radius: 16px;
+      border: 1.5px dashed rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius-md);
       display: flex;
       align-items: center;
       justify-content: center;
       color: var(--text-secondary);
       font-size: 0.9rem;
       position: relative;
+      touch-action: none;
+      transition: border-color 0.2s, background 0.2s;
     }
 
-    /* Buttons */
+    .touch-pad:active,
+    .touch-pad.touching {
+      background: rgba(0, 255, 149, 0.02);
+      border-color: rgba(0, 255, 149, 0.15);
+    }
+
+    .trackpad-hint {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .trackpad-hint-icon {
+      font-size: 1.8rem;
+      opacity: 0.15;
+    }
+
+    .trackpad-hint-text {
+      font-size: 0.75rem;
+      opacity: 0.35;
+      font-weight: 500;
+    }
+
+    .trackpad-badges {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .trackpad-badge {
+      padding: 3px 10px;
+      border-radius: 99px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: var(--text-tertiary);
+      letter-spacing: 0.04em;
+    }
+
+    /* ================================
+       FLOATING TOOLBAR
+    ================================ */
+    .floating-toolbar {
+      display: flex;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      border-radius: var(--radius-lg);
+      margin-top: 12px;
+      justify-content: space-around;
+    }
+
+    .tool-btn {
+      flex: 1;
+      height: 44px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.04);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+      border: 1px solid transparent;
+      gap: 7px;
+    }
+
+    .tool-btn span {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .tool-btn:active {
+      background: rgba(0, 255, 149, 0.12);
+      color: var(--accent);
+      border-color: var(--border-accent);
+      transform: scale(0.93);
+    }
+
+    /* Hidden keyboard trigger */
+    #keyboardInput {
+      position: absolute;
+      top: -200px;
+      left: -200px;
+      opacity: 0;
+      pointer-events: none;
+      width: 1px;
+      height: 1px;
+    }
+
+    /* ================================
+       BUTTONS
+    ================================ */
     .btn {
       width: 100%;
-      padding: 16px;
-      border-radius: 16px;
+      padding: 15px;
+      border-radius: var(--radius-md);
       font-family: inherit;
       font-weight: 700;
-      font-size: 1rem;
+      font-size: 0.95rem;
       border: none;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      letter-spacing: 0.01em;
+      position: relative;
+      overflow: hidden;
     }
 
-    .btn:active { transform: scale(0.97); }
+    .btn:active {
+      transform: scale(0.97);
+    }
 
     .btn-primary {
-      background: var(--accent);
+      background: linear-gradient(135deg, var(--accent), var(--accent-dim));
       color: #000;
-      box-shadow: 0 0 30px var(--accent-glow);
+      box-shadow: 0 4px 24px rgba(0, 255, 149, 0.25), 0 1px 0 rgba(255, 255, 255, 0.1) inset;
+    }
+
+    .btn-primary:active {
+      box-shadow: 0 2px 12px rgba(0, 255, 149, 0.2);
     }
 
     .btn-ghost {
       background: transparent;
-      border: 1px solid var(--border);
+      border: 1.5px solid var(--border);
       color: var(--text-primary);
     }
 
-    /* Device card connect button */
+    .btn-ghost:active {
+      background: var(--surface-hover);
+    }
+
+    .btn-danger {
+      background: rgba(255, 59, 92, 0.1);
+      border: 1.5px solid rgba(255, 59, 92, 0.3);
+      color: var(--danger);
+    }
+
+    .btn-danger:active {
+      background: rgba(255, 59, 92, 0.18);
+    }
+
+    /* ================================
+       DEVICE CARDS
+    ================================ */
     .device-connect-btn {
-      padding: 7px 14px;
-      border-radius: 10px;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
       font-size: 0.72rem;
       font-weight: 700;
       font-family: inherit;
       cursor: pointer;
-      border: 1px solid var(--accent);
+      border: 1.5px solid var(--border-accent);
       color: var(--accent);
-      background: transparent;
+      background: rgba(0, 255, 149, 0.06);
       transition: all 0.18s;
-      min-width: 80px;
+      min-width: 82px;
+      letter-spacing: 0.03em;
     }
-    .device-connect-btn:active { transform: scale(0.94); background: rgba(0,255,149,0.1); }
+
+    .device-connect-btn:active {
+      transform: scale(0.94);
+      background: rgba(0, 255, 149, 0.14);
+    }
+
     .device-connect-btn.connected {
-      background: rgba(0,255,149,0.12);
+      background: rgba(0, 255, 149, 0.1);
       border-color: var(--accent);
       color: var(--accent);
       opacity: 0.5;
       pointer-events: none;
     }
+
     .device-connect-btn.connecting {
-      opacity: 0.6;
+      opacity: 0.55;
       pointer-events: none;
     }
-    .device-connect-btn.connecting::after {
-      content: '...';
-      animation: dots 1s infinite;
-    }
-    @keyframes dots {
-      0% { content: '.'; } 33% { content: '..'; } 66% { content: '...'; }
+
+    /* Active device card highlight */
+    #activeDeviceCard {
+      border-color: rgba(0, 255, 149, 0.2);
+      background: rgba(0, 255, 149, 0.04);
     }
 
-    /* Scan button */
-    .scan-btn {
+    .device-icon {
+      width: 46px;
+      height: 46px;
+      background: var(--surface-hover);
+      border-radius: var(--radius-md);
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-    .scan-ripple {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      background: var(--accent);
-      border-radius: 50%;
-    }
-    .scan-ripple.active {
-      animation: ripple 0.8s infinite;
-    }
-    @keyframes ripple {
-      0% { transform: scale(1); opacity: 1; }
-      100% { transform: scale(2.5); opacity: 0; }
+      font-size: 1.2rem;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
     }
 
-    /* Shortcut cards */
+    /* ================================
+       SCAN BUTTON
+    ================================ */
+    .scan-ripple {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      background: var(--accent);
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .scan-ripple.active {
+      animation: scanRipple 0.8s ease-out infinite;
+    }
+
+    @keyframes scanRipple {
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+
+      100% {
+        transform: scale(2.8);
+        opacity: 0;
+      }
+    }
+
+    /* ================================
+       SETTINGS
+    ================================ */
+    .settings-row {
+      margin-bottom: 22px;
+    }
+
+    .settings-row:last-of-type {
+      margin-bottom: 0;
+    }
+
+    .settings-row label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 10px;
+    }
+
+    .settings-row label span {
+      font-size: 0.72rem;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .settings-slider {
+      width: 100%;
+      height: 4px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    /* Custom range slider */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      background: var(--surface-hover);
+      border-radius: 99px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px rgba(0, 255, 149, 0.4);
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+
+    input[type="range"]:active::-webkit-slider-thumb {
+      transform: scale(1.2);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border: none;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px rgba(0, 255, 149, 0.4);
+      cursor: pointer;
+    }
+
+    /* Toggle switch */
+    .setting-toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .setting-toggle-row:last-child {
+      border-bottom: none;
+    }
+
+    .setting-toggle-label {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .setting-toggle-label strong {
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+
+    .setting-toggle-label small {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 46px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--surface-hover);
+      transition: .35s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 34px;
+      border: 1.5px solid var(--border);
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: var(--text-secondary);
+      transition: .35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      border-radius: 50%;
+    }
+
+    input:checked+.slider {
+      background: rgba(0, 255, 149, 0.2);
+      border-color: var(--accent);
+    }
+
+    input:checked+.slider:before {
+      transform: translateX(20px);
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(0, 255, 149, 0.5);
+    }
+
+    /* ================================
+       SHORTCUT ROWS
+    ================================ */
     .shortcut-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 0;
+      padding: 13px 0;
       border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: opacity 0.15s;
     }
-    .shortcut-row:last-child { border-bottom: none; }
-    .shortcut-label { font-size: 0.82rem; color: var(--text-secondary); }
+
+    .shortcut-row:last-child {
+      border-bottom: none;
+    }
+
+    .shortcut-row:active {
+      opacity: 0.65;
+    }
+
+    .shortcut-label {
+      font-size: 0.84rem;
+      color: var(--text-primary);
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .shortcut-key {
-      font-size: 0.72rem;
-      font-family: monospace;
+      font-size: 0.7rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
       background: var(--surface-hover);
       border: 1px solid var(--border);
-      padding: 3px 8px;
-      border-radius: 6px;
+      padding: 4px 10px;
+      border-radius: 7px;
       color: var(--accent);
       cursor: pointer;
       transition: all 0.15s;
+      letter-spacing: 0.02em;
     }
-    .shortcut-key:hover { background: rgba(0,255,149,0.1); border-color: var(--accent); }
 
-    /* Bottom Nav */
+    .shortcut-key:active {
+      background: rgba(0, 255, 149, 0.1);
+      border-color: var(--accent);
+    }
+
+    /* ================================
+       DANGER ZONE
+    ================================ */
+    .danger-zone-card {
+      border-color: rgba(255, 59, 92, 0.15) !important;
+      background: rgba(255, 59, 92, 0.03) !important;
+    }
+
+    /* ================================
+       BOTTOM NAVIGATION
+    ================================ */
     nav {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      height: 80px;
-      background: rgba(3, 7, 12, 0.8);
-      backdrop-filter: blur(20px);
+      height: calc(var(--nav-height) + var(--safe-bottom));
+      padding-bottom: var(--safe-bottom);
+      background: rgba(5, 10, 18, 0.92);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
       border-top: 1px solid var(--border);
       display: flex;
       justify-content: space-around;
-      align-items: center;
-      padding-bottom: env(safe-area-inset-bottom);
+      align-items: flex-start;
+      padding-top: 10px;
+      z-index: 50;
     }
 
     .nav-item {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 4px;
-      color: var(--text-secondary);
+      gap: 5px;
+      color: var(--text-tertiary);
       text-decoration: none;
-      font-size: 0.7rem;
-      font-weight: 600;
-      transition: all 0.2s;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: color 0.2s;
+      padding: 2px 20px;
+      position: relative;
+    }
+
+    .nav-item i {
+      font-size: 1.2rem;
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
 
     .nav-item.active {
       color: var(--accent);
     }
 
-    .nav-item i {
-      font-size: 1.25rem;
-      margin-bottom: 2px;
+    .nav-item.active i {
+      transform: scale(1.15);
     }
 
-    /* Switch */
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 44px;
-      height: 24px;
-    }
-
-    .switch input { opacity: 0; width: 0; height: 0; }
-
-    .slider {
+    .nav-item.active::after {
+      content: '';
       position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: var(--surface);
-      transition: .4s;
-      border-radius: 34px;
-      border: 1px solid var(--border);
+      bottom: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 20px;
+      height: 2px;
+      background: var(--accent);
+      border-radius: 99px;
+      box-shadow: 0 0 8px var(--accent-glow);
     }
 
-    .slider:before {
-      position: absolute;
-      content: "";
-      height: 18px; width: 18px;
-      left: 2px; bottom: 2px;
-      background: var(--text-secondary);
-      transition: .4s;
-      border-radius: 50%;
+    /* ================================
+       EMPTY STATE
+    ================================ */
+    .empty-state {
+      text-align: center;
+      padding: 28px 20px;
+      color: var(--text-tertiary);
+      font-size: 0.82rem;
+      font-weight: 500;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
     }
 
-    input:checked + .slider { background: var(--accent-glow); border-color: var(--accent); }
-    input:checked + .slider:before { transform: translateX(20px); background: var(--accent); }
+    .empty-state i {
+      font-size: 1.8rem;
+      opacity: 0.3;
+    }
 
+    /* ================================
+       MISC UTILITIES
+    ================================ */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 16px 0;
+    }
+
+    .text-accent {
+      color: var(--accent);
+    }
+
+    /* Scroll indicator / top padding for first section */
+    .tab-content>.section-label:first-child {
+      margin-top: 4px;
+    }
   </style>
-  <script type="module" crossorigin src="/assets/index-Ch0WEs2O.js"></script>
+  <script type="module" crossorigin src="/assets/index-Mbi_9C3R.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-B0ulEir5.css">
 </head>
+
 <body>
   <div id="app">
-    <!-- ONBOARDING OVERLAY -->
-    <!-- App Selection Modal -->
-  <div id="appModal" class="modal-overlay" style="display: none;">
-    <div class="modal-card">
-      <h3 style="margin-bottom: 24px; font-weight: 800;">Configure Gesture</h3>
-      
-      <div style="margin-bottom: 24px;">
-        <label style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; color: var(--accent-primary); margin-bottom: 12px; display: block; text-transform: uppercase;">Discovered Applications</label>
-        <select id="appSelect" style="width: 100%; padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s;">
-          <option value="">-- Choose from device --</option>
-        </select>
-      </div>
 
-      <div style="margin-bottom: 30px;">
-        <label style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 12px; display: block; text-transform: uppercase;">Or Custom Command / URL</label>
-        <input type="text" id="customTarget" placeholder="e.g. spotify, chrome, https://..." style="width: 100%; padding: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: var(--text-primary); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s;">
-      </div>
+    <!-- ============================
+         APP SELECTION MODAL
+    ============================= -->
+    <div id="appModal" class="modal-overlay" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-handle"></div>
+        <h3>Configure Gesture</h3>
 
-      <div style="display: flex; gap: 12px;">
-        <button id="closeAppModal" class="btn btn-ghost" style="flex: 1;">Cancel</button>
-        <button id="saveAppShortcut" class="btn btn-primary" style="flex: 1;">Apply</button>
+        <div style="margin-bottom: 16px;">
+          <label>Discovered Applications</label>
+          <select id="appSelect">
+            <option value="">— Choose from device —</option>
+          </select>
+        </div>
+
+        <div class="modal-divider">or</div>
+
+        <div style="margin-bottom: 24px;">
+          <label>Custom Command / URL</label>
+          <input type="text" id="customTarget" placeholder="e.g. spotify, chrome, https://...">
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+          <button id="closeAppModal" class="btn btn-ghost" style="flex: 1;">Cancel</button>
+          <button id="saveAppShortcut" class="btn btn-primary" style="flex: 1;">Apply</button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div id="pairingOverlay" class="overlay">
-      <div class="logo-pulse">G</div>
-      <h2 style="font-size: 1.5rem; font-weight: 800; margin-bottom: 8px;">Connect to Hub</h2>
-      <p style="color: var(--text-secondary); font-size: 0.9rem;">Enter the 6-digit PIN from your PC</p>
-      
+    <!-- ============================
+         PAIRING OVERLAY
+    ============================= -->
+    <div id="pairingOverlay" class="overlay">
+      <div class="logo-wrap">
+        <div class="logo-ring-2"></div>
+        <div class="logo-ring"></div>
+        <div class="logo-pulse">G</div>
+      </div>
+
+      <h2>Connect to Hub</h2>
+      <p>Enter the 6-digit PIN shown on your PC</p>
+
       <div class="pin-input-group">
-        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
-        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
-        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
-        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
-        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
-        <input type="number" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="tel" inputmode="numeric" class="pin-box" maxlength="1" pattern="\d*" autocomplete="one-time-code">
+        <input type="tel" inputmode="numeric" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="tel" inputmode="numeric" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="tel" inputmode="numeric" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="tel" inputmode="numeric" class="pin-box" maxlength="1" pattern="\d*">
+        <input type="tel" inputmode="numeric" class="pin-box" maxlength="1" pattern="\d*">
       </div>
 
-      <div id="pairStatusText" style="margin-top: 15px; font-size: 0.85rem; color: var(--accent); font-weight: 600; min-height: 1.2em;"></div>
-      <p id="pairError" style="color: var(--danger); font-size: 0.8rem; margin-top: 8px; opacity: 0; transition: opacity 0.3s;">⚠️ Invalid PIN or Request Denied</p>
-      <button id="pairBtn" class="btn btn-primary" style="margin-top: 20px;">Pair with Device</button>
+      <div id="pairStatusText"></div>
+      <p id="pairError"><i class="fas fa-exclamation-triangle"></i> Invalid PIN or Request Denied</p>
+      <button id="pairBtn" class="btn btn-primary" style="margin-top: 24px; max-width: 320px;">Pair with Device</button>
     </div>
 
-    <!-- HEADER -->
+    <!-- ============================
+         HEADER
+    ============================= -->
     <header>
-      <h1>GestureLink</h1>
+      <div class="header-logo">
+        <div class="header-logo-icon">G</div>
+        <h1>GestureLink</h1>
+      </div>
       <div class="header-right">
-        <button id="disconnectBtn" class="disconnect-btn" onclick="handleDisconnect()">⏏ Disconnect</button>
-        <div id="connBadge" class="conn-status">WAITING...</div>
+        <button id="disconnectBtn" class="disconnect-btn" onclick="handleDisconnect()">
+          <i class="fas fa-sign-out-alt" style="font-size: 0.7rem;"></i> Disconnect
+        </button>
+        <div id="connBadge" class="conn-status">WAITING</div>
       </div>
     </header>
 
-    <!-- MAIN -->
+    <!-- ============================
+         MAIN CONTENT
+    ============================= -->
     <main>
-      <!-- CONTROL TAB -->
+
+      <!-- ---- CONTROL TAB ---- -->
       <section id="controlTab" class="tab-content active">
+
+        <div class="section-label">Remote Intelligence</div>
+
+        <!-- Camera Toggle Card -->
         <div class="card">
           <div class="card-title">
-            <span>Remote PC Intelligence</span>
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <span id="remoteGestureStatus" style="color: var(--accent); font-family: monospace; font-size: 0.75rem;">CAMERA OFF</span>
+            <span>Hub Camera</span>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span id="remoteGestureStatus"
+                style="color: var(--accent); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; font-family: monospace;">CAMERA
+                OFF</span>
               <label class="switch">
                 <input type="checkbox" id="pcCameraToggle">
                 <span class="slider"></span>
               </label>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 12px; padding: 10px; background: rgba(0,255,149,0.05); border-radius: 12px; border: 1px solid rgba(0,255,149,0.1);">
-            <div style="font-size: 1.5rem; color: var(--accent);"><i class="fas fa-video"></i></div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary);">
-              Toggle the <b>PC's built-in camera</b> to enable gesture recognition on the target machine.
+          <div class="info-banner">
+            <i class="fas fa-video info-banner-icon"></i>
+            <div class="info-banner-text">
+              Enable the <strong style="color: var(--text-primary);">Hub Camera</strong> to activate gesture recognition
+              on your PC.
             </div>
           </div>
         </div>
 
+        <!-- Vision Mode Card -->
+        <div class="card">
+          <div class="card-title">Active Vision Mode</div>
+          <div class="mode-selector">
+            <button class="mode-btn active" data-mode="0">
+              <i class="fas fa-mouse-pointer" style="display:block; margin-bottom:5px; font-size:1rem;"></i>
+              CURSOR
+            </button>
+            <button class="mode-btn" data-mode="1">
+              <i class="fas fa-paint-brush" style="display:block; margin-bottom:5px; font-size:1rem;"></i>
+              CANVAS
+            </button>
+            <button class="mode-btn" data-mode="2">
+              <i class="fas fa-cube" style="display:block; margin-bottom:5px; font-size:1rem;"></i>
+              BUILDER
+            </button>
+          </div>
+        </div>
 
+        <!-- Trackpad Card -->
         <div class="card">
           <div class="card-title">Precision Trackpad</div>
           <div id="touchZone" class="touch-pad">
-            <div style="text-align: center;">
-              <i class="fas fa-hand-pointer" style="font-size: 1.5rem; opacity: 0.2; margin-bottom: 12px; display: block;"></i>
-              <span style="opacity: 0.5; font-size: 0.8rem;">Slide to move • Tap to click</span>
+            <div class="trackpad-hint">
+              <i class="fas fa-hand-pointer trackpad-hint-icon"></i>
+              <span class="trackpad-hint-text">Slide to move · Tap to click</span>
+              <div class="trackpad-badges">
+                <span class="trackpad-badge">2-FINGER SCROLL</span>
+                <span class="trackpad-badge">PINCH ZOOM</span>
+              </div>
             </div>
           </div>
+
+          <!-- Action Toolbar -->
+          <div class="floating-toolbar">
+            <div class="tool-btn" id="copyBtn" title="Copy">
+              <i class="fas fa-copy"></i>
+              <span>Copy</span>
+            </div>
+            <div class="tool-btn" id="pasteBtn" title="Paste">
+              <i class="fas fa-paste"></i>
+              <span>Paste</span>
+            </div>
+            <div class="tool-btn" id="kbBtn" title="Keyboard">
+              <i class="fas fa-keyboard"></i>
+              <span>Type</span>
+            </div>
+          </div>
+
+          <!-- Hidden keyboard input -->
+          <input type="text" id="keyboardInput" autocomplete="off" autocorrect="off" autocapitalize="off"
+            spellcheck="false" aria-hidden="true">
         </div>
+
       </section>
 
-      <!-- DEVICES TAB -->
+      <!-- ---- DEVICES TAB ---- -->
       <section id="devicesTab" class="tab-content">
-        <div class="card-title" style="padding-left: 10px;">Network Connectivity</div>
+
+        <div class="section-label">Network Connectivity</div>
+
+        <!-- Active Device -->
         <div id="activeDeviceCard" class="card">
-          <div style="display: flex; align-items: center; gap: 16px;">
-            <div style="width: 48px; height: 48px; background: var(--surface); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem;">💻</div>
-            <div>
-              <div id="activeDeviceName" style="font-weight: 700;">Local Hub PC</div>
-              <div id="activeDeviceIP" style="color: var(--text-secondary); font-size: 0.75rem;">Searching...</div>
+          <div class="card-title">Connected Hub</div>
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div class="device-icon">💻</div>
+            <div style="flex: 1; min-width: 0;">
+              <div id="activeDeviceName" style="font-weight: 700; font-size: 0.95rem;">Local Hub PC</div>
+              <div id="activeDeviceIP" style="color: var(--text-secondary); font-size: 0.73rem; margin-top: 2px;">
+                Searching...</div>
             </div>
+            <div id="connBadgeDevice" class="conn-status">OFFLINE</div>
           </div>
         </div>
 
+        <!-- Nearby PCs -->
         <div class="card">
-          <div class="card-title">Nearby PCs
-            <button id="scanBtn" class="btn btn-ghost" style="padding: 6px 14px; font-size: 0.75rem; width: auto; display: flex; align-items: center; gap: 6px;">
-              <span class="scan-ripple" id="scanRipple"></span> Scan Network
+          <div class="card-title">
+            <span>Nearby PCs</span>
+            <button id="scanBtn" class="btn btn-ghost"
+              style="width: auto; padding: 7px 14px; font-size: 0.72rem; display: flex; align-items: center; gap: 7px; border-radius: 99px;">
+              <span class="scan-ripple" id="scanRipple"></span>
+              Scan Network
             </button>
           </div>
-          <div id="deviceList" style="display: flex; flex-direction: column; gap: 8px;">
-            <div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">Tap Scan to discover PCs</div>
+          <div id="deviceList">
+            <div class="empty-state">
+              <i class="fas fa-satellite-dish"></i>
+              <span>Tap Scan to discover PCs</span>
+            </div>
           </div>
-          <button id="addManualBtn" class="btn btn-ghost" style="margin-top: 12px; padding: 12px; font-size: 0.85rem;">+ Add Manual IP</button>
+          <div style="margin-top: 12px;">
+            <button id="addManualBtn" class="btn btn-ghost" style="font-size: 0.82rem; padding: 12px;">
+              <i class="fas fa-plus" style="margin-right: 6px; font-size: 0.75rem;"></i>Add Manual IP
+            </button>
+          </div>
         </div>
+
       </section>
 
-      <!-- SETTINGS TAB -->
+      <!-- ---- SETTINGS TAB ---- -->
       <section id="settingsTab" class="tab-content">
-        <div class="card-title" style="padding-left: 10px;">Configuration</div>
+
+        <div class="section-label">Configuration</div>
+
+        <!-- Sliders -->
         <div class="card">
-          <div style="margin-bottom: 24px;">
-            <label style="display: block; font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase;">Cursor Sensitivity</label>
-            <input type="range" id="sensRange" min="5" max="95" value="50" style="width: 100%; accent-color: var(--accent);">
+          <div class="settings-row">
+            <label>
+              Cursor Sensitivity
+              <span id="sensVal">50</span>
+            </label>
+            <input type="range" id="sensRange" min="5" max="95" value="50"
+              oninput="document.getElementById('sensVal').textContent = this.value">
           </div>
-          
+          <div class="divider"></div>
+          <div class="settings-row">
+            <label>
+              Scroll Speed
+              <span id="scrollVal">12</span>
+            </label>
+            <input type="range" id="scrollRange" min="1" max="50" value="12"
+              oninput="document.getElementById('scrollVal').textContent = this.value">
+          </div>
+
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
             <label style="font-size: 0.85rem; font-weight: 600;">Haptic Feedback</label>
             <label class="switch">
@@ -552,33 +1407,48 @@
             </label>
           </div>
 
-          <button id="saveBtn" class="btn btn-primary">Apply Settings</button>
+          <button id="saveBtn" class="btn btn-primary" style="margin-top: 20px;">Apply Settings</button>
         </div>
 
-
-        <div class="card" style="margin-top: 16px;">
-          <div class="card-title">Keyboard Shortcuts</div>
+        <!-- Keyboard Shortcuts -->
+        <div class="section-label">Gesture Shortcuts</div>
+        <div class="card">
           <div id="shortcutList">
             <div class="shortcut-row" onclick="globalThis.editShortcut('three_fingers')">
-              <span class="shortcut-label">🤟 Three Fingers → Mission Control</span>
+              <span class="shortcut-label">
+                <span style="font-size: 1.1rem;">🤟</span>
+                Three Fingers
+              </span>
               <span class="shortcut-key" data-shortcut="three_fingers">super+d</span>
             </div>
             <div class="shortcut-row" onclick="globalThis.editShortcut('four_fingers')">
-              <span class="shortcut-label">🤙 Four Fingers → Fullscreen</span>
+              <span class="shortcut-label">
+                <span style="font-size: 1.1rem;">🤙</span>
+                Four Fingers
+              </span>
               <span class="shortcut-key" data-shortcut="four_fingers">f11</span>
             </div>
           </div>
         </div>
 
-        <div class="card" style="margin-top: 16px;">
-          <div class="card-title">Danger Zone</div>
-          <p style="color: var(--text-secondary); font-size: 0.75rem; margin-bottom: 16px;">Disconnect from the current Hub and reset all pairing data.</p>
-          <button id="logoutBtn" class="btn btn-danger">Reset Session</button>
+        <!-- Danger Zone -->
+        <div class="section-label">Session</div>
+        <div class="card danger-zone-card">
+          <div class="card-title" style="color: var(--danger);">Danger Zone</div>
+          <p style="color: var(--text-secondary); font-size: 0.78rem; margin-bottom: 16px; line-height: 1.6;">
+            Disconnect from the current Hub and clear all pairing data from this device.
+          </p>
+          <button id="logoutBtn" class="btn btn-danger">
+            <i class="fas fa-trash-alt" style="margin-right: 8px; font-size: 0.85rem;"></i>Reset Session
+          </button>
         </div>
+
       </section>
     </main>
 
-    <!-- NAVIGATION -->
+    <!-- ============================
+         BOTTOM NAVIGATION
+    ============================= -->
     <nav>
       <a href="#" class="nav-item active" data-tab="control">
         <i class="fas fa-gamepad"></i>
@@ -589,20 +1459,23 @@
         <span>Devices</span>
       </a>
       <a href="#" class="nav-item" data-tab="settings">
-        <i class="fas fa-cog"></i>
+        <i class="fas fa-sliders-h"></i>
         <span>Settings</span>
       </a>
     </nav>
-  </div>
+
+  </div><!-- #app -->
 
   <script>
-    // PIN Auto-focus logic
+    // PIN Auto-focus logic (runs immediately for the overlay)
+    // NOTE: main.ts also sets up PIN inputs — this inline script only handles
+    // the visual focus flow before the module loads.
     const inputs = document.querySelectorAll('.pin-box');
     inputs.forEach((input, index) => {
       input.addEventListener('input', (e) => {
-        const v = e.target.value;
         // Clamp to single digit
-        if (v.length > 1) e.target.value = v[v.length - 1];
+        const v = e.target.value.replace(/\D/g, '');
+        e.target.value = v ? v[v.length - 1] : '';
         if (e.target.value && index < inputs.length - 1) inputs[index + 1].focus();
       });
       input.addEventListener('keydown', (e) => {
@@ -610,9 +1483,9 @@
       });
     });
 
-    // Bug 2: Disconnect — clear token and show pairing screen
+    // Disconnect handler — clears token and reloads
     function handleDisconnect() {
-      if (!confirm('Disconnect and enter a new PIN?')) return;
+      if (!confirm('Disconnect from Hub and enter a new PIN?')) return;
       localStorage.removeItem('gesturelink_token');
       location.reload();
     }
@@ -622,4 +1495,5 @@
     }
   </script>
 </body>
+
 </html>
