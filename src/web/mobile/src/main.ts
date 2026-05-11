@@ -42,13 +42,7 @@ async function init() {
   setupTouchpad();
   setupPinInputs();
   setupShortcuts();
-<<<<<<< HEAD
-
-  // Issue 8 fix: removed duplicate logoutBtn.onclick here.
-  // The event listener at line ~105 handles logout with a confirm dialog.
-=======
   setupKeyboardToolbar();
->>>>>>> feature/ngrok-tunnel
 
   closeAppModal.onclick = () => {
     appModal.style.display = 'none';
@@ -89,11 +83,7 @@ async function init() {
     pairingOverlay.style.display = 'flex';
   }
 
-<<<<<<< HEAD
-  // Toggles
-=======
   // Haptic toggle
->>>>>>> feature/ngrok-tunnel
   document.getElementById("hapticToggle")?.addEventListener('change', (e: any) => {
     hapticsEnabled = e.target.checked;
     localStorage.setItem("gesturelink_haptics", hapticsEnabled.toString());
@@ -383,10 +373,6 @@ async function activatePC(d: any) {
   document.getElementById('disconnectBtn')?.classList.add('visible');
   syncSettings();
 
-<<<<<<< HEAD
-  // Initial mode and camera sync
-=======
->>>>>>> feature/ngrok-tunnel
   try {
     const [modeRes, camRes] = await Promise.all([
       fetch(`${location.origin}/api/hub/mode`).then(r => r.json()),
@@ -401,17 +387,10 @@ async function activatePC(d: any) {
 
     const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
     if (pcCameraToggle) pcCameraToggle.checked = camRes.active;
-<<<<<<< HEAD
-    const remoteGestureStatus = document.getElementById("remoteGestureStatus");
-    if (remoteGestureStatus) remoteGestureStatus.textContent = camRes.active ? "CAMERA ON" : "CAMERA OFF";
-
-  } catch (_) { }
-=======
     const gestureStatusEl = document.getElementById("remoteGestureStatus");
     if (gestureStatusEl) gestureStatusEl.textContent = camRes.active ? "CAMERA ON" : "CAMERA OFF";
 
   } catch (_) {}
->>>>>>> feature/ngrok-tunnel
 }
 
 async function syncSettings() {
@@ -447,8 +426,8 @@ function renderShortcuts(shortcuts: Record<string, any>) {
   });
 }
 
-// @ts-ignore
-globalThis.editShortcut = async (slot: string) => {
+let activeShortcutSlot = "";
+(globalThis as any).editShortcut = async (slot: string) => {
   activeShortcutSlot = slot;
   appModal.style.display = 'flex';
 
@@ -467,16 +446,6 @@ globalThis.editShortcut = async (slot: string) => {
     console.error("Failed to load apps", e);
   }
 };
-
-<<<<<<< HEAD
-  closeBtn.onclick = () => modal.style.display = 'none';
-
-  saveBtn.onclick = async () => {
-    const target = customInput.value || select.value;
-    if (!target) return;
-=======
-let activeShortcutSlot = "";
->>>>>>> feature/ngrok-tunnel
 
 saveAppShortcut.onclick = async () => {
   const target = customTarget.value.trim() || appSelect.value;
@@ -553,28 +522,11 @@ async function logout() {
   const token = localStorage.getItem("gesturelink_token");
   if (token) {
     try {
-<<<<<<< HEAD
-      const res = await fetch(`${location.origin}/api/shortcuts`);
-      const data = await res.json();
-      const shortcuts = data.shortcuts || {};
-
-      shortcuts[slot] = { target, mode: target.startsWith('http') ? 'url' : 'app' };
-
-      await fetch(`${location.origin}/api/shortcuts`, {
-=======
       await fetch(`${location.origin}/api/logout`, {
->>>>>>> feature/ngrok-tunnel
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token })
       });
-<<<<<<< HEAD
-
-      renderShortcuts(shortcuts);
-      triggerHaptic(ImpactStyle.Medium);
-      modal.style.display = 'none';
-    } catch (e) { alert("Failed to update shortcut"); }
-=======
     } catch (_) { /* best effort */ }
   }
   localStorage.removeItem("gesturelink_token");
@@ -718,7 +670,6 @@ function setupKeyboardToolbar() {
   kbBtn.onclick = () => {
     keyboardInput.focus();
     triggerHaptic(ImpactStyle.Light);
->>>>>>> feature/ngrok-tunnel
   };
 
   copyBtn.onclick = () => {
@@ -770,12 +721,8 @@ async function saveSettings() {
     const sens = (document.getElementById("sensRange") as HTMLInputElement).value;
     const scroll = (document.getElementById("scrollRange") as HTMLInputElement).value;
     await fetch(`${location.origin}/api/settings`, {
-<<<<<<< HEAD
-      method: "POST", headers: { "Content-Type": "application/json" },
-=======
       method: "POST",
       headers: { "Content-Type": "application/json" },
->>>>>>> feature/ngrok-tunnel
       body: JSON.stringify({
         sensitivity: Number.parseInt(sens),
         scroll_speed: Number.parseInt(scroll)
@@ -867,252 +814,4 @@ async function pollPairingStatus(reqId: string) {
   }, 2000);
 }
 
-<<<<<<< HEAD
-// Issue 6 fix: setupShortcuts only does initial load of labels.
-// editShortcut is handled by the globalThis.editShortcut below (line ~326).
-async function setupShortcuts() {
-  try {
-    const res = await fetch(`${location.origin}/api/shortcuts`);
-    const data = await res.json();
-    renderShortcuts(data.shortcuts || {});
-  } catch (_) { /* use defaults */ }
-}
-
-let activeShortcutSlot = "";
-(globalThis as any).editShortcut = async (slot: string) => {
-  activeShortcutSlot = slot;
-  appModal.style.display = 'flex';
-
-  // Load apps from active PC
-  try {
-    const targetIp = activePC ? activePC.ip : "";
-    const res = await fetch(`${location.origin}/api/apps?ip=${targetIp}`);
-    const data = await res.json();
-    appSelect.innerHTML = '<option value="">-- Choose from device --</option>';
-    data.apps.forEach((app: any) => {
-      const opt = document.createElement("option");
-      opt.value = app.target;
-      opt.textContent = app.name;
-      appSelect.appendChild(opt);
-    });
-  } catch (e) {
-    console.error("Failed to load apps", e);
-  }
-};
-
-saveAppShortcut.onclick = async () => {
-  const target = customTarget.value.trim() || appSelect.value;
-  if (!target) { alert("Please select or type an app/command."); return; }
-
-  try {
-    // Issue 7 fix: use the correct {slot, target} payload the server expects
-    const res = await fetch(`${location.origin}/api/shortcuts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shortcuts: { [activeShortcutSlot]: { target, enabled: true } } })
-    });
-    if (!res.ok) throw new Error("Server error");
-
-    // Update UI label
-    const keyEl = document.querySelector(`.shortcut-key[data-shortcut="${activeShortcutSlot}"]`);
-    if (keyEl) keyEl.textContent = target;
-
-    appModal.style.display = 'none';
-    customTarget.value = "";
-    triggerHaptic(ImpactStyle.Medium);
-  } catch (_) {
-    alert("Failed to save shortcut. Check connection.");
-  }
-};
-
-async function startApp() {
-  addDeviceToList(location.hostname, "Hub (Primary)");
-  // @ts-ignore
-  globalThis.connectToPC(0);
-}
-
-// Issue 5 (client-side): Call /api/logout to revoke token server-side before clearing state.
-async function logout() {
-  const token = localStorage.getItem("gesturelink_token");
-  if (token) {
-    try {
-      await fetch(`${location.origin}/api/logout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token })
-      });
-    } catch (_) { /* best effort */ }
-  }
-  localStorage.removeItem("gesturelink_token");
-  localStorage.removeItem("gesturelink_ip");
-  location.reload();
-}
-
-async function triggerHaptic(style: ImpactStyle = ImpactStyle.Light) {
-  if (!hapticsEnabled) return;
-  if (navigator.vibrate) navigator.vibrate(style === ImpactStyle.Heavy ? 40 : 15);
-}
-
-
-function setupTouchpad() {
-  let lastX = 0, lastY = 0, startTime = 0;
-  let lastTapTime = 0;
-  let maxFingers = 0;
-  let lastPinchDist = 0;
-  let lastMoveTime = 0;
-  let isMoving = false;
-  let isDragging = false;
-  let twoFingerStarted = false;  // lock state: true when 2+ fingers detected
-  let twoFingerMidY = 0;          // midpoint Y of two fingers for scroll
-
-  touchZone.addEventListener('touchstart', (e: any) => {
-    maxFingers = Math.max(maxFingers, e.touches.length);
-    lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-    startTime = Date.now();
-    isMoving = false;
-
-    if (e.touches.length === 2) {
-      twoFingerStarted = true;  // lock: no cursor moves allowed this gesture
-      twoFingerMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      lastPinchDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-    } else if (e.touches.length === 1) {
-      twoFingerStarted = false;
-    }
-
-    if (e.touches.length === 1 && (startTime - lastTapTime) < 300) {
-      isDragging = true;
-      if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'click_down', button: 'left' }));
-      }
-    }
-    e.preventDefault();
-  }, { passive: false });
-
-  touchZone.addEventListener('touchmove', (e: any) => {
-    isMoving = true;
-    maxFingers = Math.max(maxFingers, e.touches.length);
-
-    // As soon as a second finger appears mid-gesture, lock into scroll mode
-    if (e.touches.length >= 2 && !twoFingerStarted) {
-      twoFingerStarted = true;
-      twoFingerMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      lastPinchDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-    }
-
-    if (twoFingerStarted && e.touches.length >= 2) {
-      // --- Two-Finger Zone: scroll or pinch-zoom ---
-      const currentDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-      const currentMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      const pinchDelta = currentDist - lastPinchDist;
-
-      if (Math.abs(pinchDelta) > 8) {
-        // Pinch-to-zoom when fingers spread/close significantly
-        if (activePC?.ws?.readyState === 1) {
-          activePC.ws.send(JSON.stringify({ type: 'zoom', delta: pinchDelta }));
-        }
-        lastPinchDist = currentDist;
-      } else {
-        // Two-finger scroll — always active when not pinching
-        const scrollDy = currentMidY - twoFingerMidY;
-        if (Math.abs(scrollDy) > 2 && activePC?.ws?.readyState === 1) {
-          activePC.ws.send(JSON.stringify({ type: 'scroll', dy: scrollDy * -1.5 }));
-        }
-      }
-      twoFingerMidY = currentMidY;
-      lastPinchDist = currentDist;
-
-    } else if (!twoFingerStarted && e.touches.length === 1 && !isDragging) {
-      // --- Single finger: cursor move ---
-      const now = Date.now();
-      if (now - lastMoveTime < 16) return;
-
-      const dx = e.touches[0].clientX - lastX;
-      const dy = e.touches[0].clientY - lastY;
-      lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-
-      if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
-        lastMoveTime = now;
-      }
-    } else if (!twoFingerStarted && e.touches.length === 1 && isDragging) {
-      // --- Single finger drag (left-mouse held) ---
-      const dx = e.touches[0].clientX - lastX;
-      const dy = e.touches[0].clientY - lastY;
-      lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-      if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'move', dx, dy }));
-      }
-    } else if (e.touches.length === 2) {
-      const currentDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-
-      const delta = currentDist - lastPinchDist;
-      if (Math.abs(delta) > 5) {
-        isPinching = true;
-        if (activePC?.ws?.readyState === 1) {
-          activePC.ws.send(JSON.stringify({ type: 'zoom', delta }));
-        }
-        lastPinchDist = currentDist;
-      } else if (!isPinching) {
-        // Two-Finger Scroll as fallback if not pinching
-        const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        const dy = currentY - lastY;
-        lastY = currentY;
-        if (activePC?.ws?.readyState === 1) {
-          activePC.ws.send(JSON.stringify({ type: 'scroll', dy: dy * -1.5 }));
-        }
-      }
-    }
-    e.preventDefault();
-  }, { passive: false });
-
-  touchZone.addEventListener('touchend', (e: any) => {
-    if (e.touches.length > 0) return; // Wait until the last finger is lifted to prevent double-taps
-
-    const now = Date.now();
-    const duration = now - startTime;
-
-    if (isDragging) {
-      isDragging = false;
-      if (activePC?.ws?.readyState === 1) {
-        activePC.ws.send(JSON.stringify({ type: 'click_up', button: 'left' }));
-      }
-    } else if (duration < 250 && !isMoving) {
-      // Standard Tap (1 or 2 fingers)
-      if (activePC?.ws?.readyState === 1 && maxFingers < 3) {
-        const button = maxFingers === 2 ? 'right' : 'left';
-        activePC.ws.send(JSON.stringify({ type: 'click', button }));
-        triggerHaptic(maxFingers === 2 ? ImpactStyle.Medium : ImpactStyle.Light);
-      }
-      lastTapTime = now;
-    } else if (duration >= 1000 && !isMoving) {
-      // Long Hold (3 or 4 fingers)
-      if (activePC?.ws?.readyState === 1 && (maxFingers === 3 || maxFingers === 4)) {
-        activePC.ws.send(JSON.stringify({ type: 'shortcut', slot: `touch_${maxFingers}_finger` }));
-        triggerHaptic(ImpactStyle.Heavy);
-      }
-    } else {
-      lastTapTime = 0;
-    }
-
-    if (e.touches.length === 0) {
-      maxFingers = 0;
-      twoFingerStarted = false;
-    }
-  });
-}
-
-=======
->>>>>>> feature/ngrok-tunnel
 init();
