@@ -32,6 +32,10 @@ class GestureConfig(BaseModel):
         2.0,
         description="Minimum pixel delta before moving cursor (reduces micro-jitter).",
     )
+    trackpad_sensitivity: float = Field(
+        1.5,
+        description="Multiplier for mobile trackpad movement (higher = faster cursor).",
+    )
 
     # --- Cursor mode — thumb-based gestures ---
     # Thumb extension: tip far from index MCP = thumb is out

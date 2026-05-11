@@ -103,8 +103,6 @@ hidden_imports = [
 datas = [
     # Hub Dashboard HTML
     (str(ROOT / "src" / "web" / "hub" / "hub.html"),         "src/web/hub"),
-    # Remote client HTML
-    (str(ROOT / "src" / "web" / "client" / "remote_client.html"), "src/web/client"),
     # Mobile PWA (built with: npm run build inside src/web/mobile)
     (str(ROOT / "src" / "web" / "mobile" / "dist"),          "src/web/mobile/dist"),
     # AI Model file

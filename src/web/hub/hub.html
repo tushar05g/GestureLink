@@ -375,8 +375,17 @@
                     <p style="color: var(--text-secondary); font-size: 0.9rem;">Hub Status: <span
                             style="color: var(--accent)">● Active Monitoring</span></p>
                 </div>
-                <button onclick="document.getElementById('qr-modal').style.display='flex'" class="btn btn-primary">+
-                    Pair Mobile</button>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px; display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700;">HUB NAME:</span>
+                        <input type="text" id="hub-name-input" 
+                            style="background: transparent; border: none; color: var(--accent); font-weight: 800; font-size: 0.9rem; width: 120px; outline: none;"
+                            placeholder="e.g. My Hub">
+                        <button onclick="saveHubName()" style="background: var(--accent); color: #000; border: none; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; cursor: pointer; font-weight: bold;">SAVE</button>
+                    </div>
+                    <button onclick="document.getElementById('qr-modal').style.display='flex'" class="btn btn-primary">+
+                        Pair Mobile</button>
+                </div>
             </div>
 
             <div class="grid">
@@ -900,6 +909,12 @@
                         if (signal.type === "offer") {
                             if (peerConn) peerConn.close();
                             peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+                            peerConn.ondatachannel = e => {
+                                const dc = e.channel;
+                                dc.onmessage = msg => {
+                                    if (localWS && localWS.readyState === 1) localWS.send(msg.data);
+                                };
+                            };
                             peerConn.ontrack = e => {
                                 video.srcObject = e.streams[0];
                                 placeholder.style.display = 'none';
@@ -925,9 +940,27 @@
                         }
                     }
                 } catch (e) { }
-                await new Promise(r => setTimeout(r, 1000));
+                await new Promise(r => setTimeout(r, 100)); // 100ms polling for instant handshake
             }
         }
+
+        async function saveHubName() {
+            const name = document.getElementById('hub-name-input').value.trim();
+            if (!name) return;
+            try {
+                const res = await fetch('/api/hub/name', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                if (res.ok) alert("Hub renamed successfully!");
+            } catch (e) { console.error(e); }
+        }
+
+        // Initialize name field
+        fetch('/api/hub/info').then(r => r.json()).then(data => {
+            if (data.hostname) document.getElementById('hub-name-input').value = data.hostname;
+        });
 
         initLocalWS();
         pollSignals();

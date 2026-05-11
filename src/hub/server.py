@@ -26,6 +26,7 @@ import uvicorn
 import qrcode
 import socket
 import websockets
+from pyngrok import ngrok, conf
 
 from src.core.config import CONFIG
 from src.core.controller import MouseController
@@ -71,7 +72,6 @@ APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
 
 # Use resource_path() so these resolve correctly inside a PyInstaller .exe
-CLIENT_HTML  = resource_path("src/web/client/remote_client.html")
 HUB_HTML     = resource_path("src/web/hub/hub.html")
 MOBILE_DIST  = resource_path("src/web/mobile/dist")
 SETTINGS_FILE = HUB_DIR / "settings.json"
@@ -79,10 +79,14 @@ SECURITY_FILE = HUB_DIR / "security.json"
 CERT_PEM = resource_path("cert.pem")
 KEY_PEM  = resource_path("key.pem")
 
-def _save_settings(sensitivity: int, scroll_speed: int) -> None:
+def _save_settings(sensitivity: int, scroll_speed: int, trackpad_sensitivity: float = 1.5) -> None:
     try:
         with open(SETTINGS_FILE, "w") as f:
-            json.dump({"sensitivity": sensitivity, "scroll_speed": scroll_speed}, f)
+            json.dump({
+                "sensitivity": sensitivity, 
+                "scroll_speed": scroll_speed,
+                "trackpad_sensitivity": trackpad_sensitivity
+            }, f)
     except Exception as e:
         logger.error("Failed to save settings: %s", e)
 
@@ -93,52 +97,77 @@ def _load_settings() -> None:
                 data = json.load(f)
                 sens = data.get("sensitivity", 50)
                 scroll = data.get("scroll_speed", 20)
+                tp_sens = data.get("trackpad_sensitivity", 1.5)
+                
+                # Apply vision settings
                 alpha = 0.05 + (sens - 5) / 90.0 * 0.45
                 thresh = 8.0 - (sens - 5) / 90.0 * 7.0
                 CONFIG.gesture.smoothing = alpha
                 CONFIG.gesture.move_threshold_px = max(0.5, thresh)
+                
+                # Apply trackpad/scroll settings
                 CONFIG.gesture.scroll_speed = int(scroll)
+                CONFIG.gesture.trackpad_sensitivity = float(tp_sens)
         except Exception as e:
             logger.error("Failed to load settings: %s", e)
 
 def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     def _open_dashboard():
         import webbrowser, subprocess, os, time
-        time.sleep(1.5)  # Wait for server to start
+        # Give the tunnel 3 seconds to establish
+        time.sleep(3.0) 
+        
         proto = "https" if CERT_PEM.exists() else "http"
-        url = f"{proto}://localhost:{port}/hub"
+        local_url = f"{proto}://localhost:{port}/hub"
         
-        # Try to open as a Chrome "App" for a desktop feel (Issue #3)
-        chrome_paths = [
+        # Prioritize remote URL (Tunnel or Deployment)
+        remote_url = getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
+        target_url = remote_url if remote_url else local_url
+        
+        # Ensure we always open the /hub dashboard path on the PC
+        if not target_url.endswith("/hub"):
+            target_url = target_url.rstrip("/") + "/hub"
+        
+        # If we are falling back to localhost, show a debug popup
+        if target_url == local_url:
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(0, "App is running on local host (No active tunnel detected)", "GestureLink Debug", 0x40)
+            except: pass
+
+        # Attempt to use Chrome/Edge in App Mode for a "Clean" window
+        app_paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
         ]
-        for path in chrome_paths:
+        for path in app_paths:
             if os.path.exists(path):
                 try:
-                    subprocess.Popen([path, f"--app={url}"])
+                    subprocess.Popen([path, f"--app={target_url}"])
                     return
-                except Exception: pass
-        
-        # Try Edge app mode
-        edge_paths = [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-        ]
-        for path in edge_paths:
-            if os.path.exists(path):
-                try:
-                    subprocess.Popen([path, f"--app={url}"])
-                    return
-                except Exception: pass
+                except: pass
                 
         # Fallback to default browser
-        webbrowser.open(url)
+        webbrowser.open(target_url)
 
     # --- LIFESPAN HANDLER (Startup/Shutdown) ---
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
         _load_settings()
+        
+        # Load Friendly Name from config
+        app.state.friendly_name = platform.node()
+        config_path = os.path.join(os.path.dirname(__file__), "hub_config.json")
+        if os.path.exists(config_path):
+            try:
+                import json
+                with open(config_path, "r") as f:
+                    app.state.friendly_name = json.load(f).get("friendly_name", platform.node())
+            except: pass
+            
         discovery.start()
         lan_ip = detect_lan_ip()
         proto = "https" if CERT_PEM.exists() else "http"
@@ -157,9 +186,32 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
         app.state.cleanup_task = asyncio.create_task(_cleanup_signals_loop())
         
+        # --- NGROK TUNNEL ---
+        app.state.ngrok_url = None
+        auth_token = os.getenv("NGROK_AUTH_TOKEN")
+        if auth_token:
+            try:
+                logger.info("Initializing ngrok tunnel...")
+                ngrok.set_auth_token(auth_token)
+                # If we are running with local SSL, tell ngrok to use https for the local target
+                # otherwise use http. Note: ngrok's public URL will always be https.
+                local_proto = "https" if CERT_PEM.exists() else "http"
+                # host_header="localhost" is critical for local HTTPS with self-signed certs
+                tunnel = ngrok.connect(addr=f"{local_proto}://localhost:{port}", bind_tls=True, host_header="localhost")
+                app.state.ngrok_url = tunnel.public_url
+                print(f"  * Remote Tunnel:    {app.state.ngrok_url}")
+                logger.info(f"Ngrok tunnel established: {app.state.ngrok_url}")
+            except Exception as e:
+                logger.error(f"Failed to start ngrok tunnel: {e}")
+        
         yield
         
         # Shutdown
+        if app.state.ngrok_url:
+            logger.info("Closing ngrok tunnel...")
+            ngrok.disconnect(app.state.ngrok_url)
+            ngrok.kill()
+            
         discovery.stop()
         vision_worker.stop()
         logger.info("Hub shutting down...")
@@ -256,13 +308,30 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def get_connected_clients() -> JSONResponse:
         return JSONResponse({"clients": list(connected_clients.values())})
 
+    @app.post("/api/hub/name")
+    async def set_hub_name(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        name = payload.get("name", "")
+        if name:
+            app.state.friendly_name = name
+            # Save to local config file for non-tech persistence
+            config_path = os.path.join(os.path.dirname(__file__), "hub_config.json")
+            try:
+                import json
+                with open(config_path, "w") as f:
+                    json.dump({"friendly_name": name}, f)
+            except: pass
+            logger.info(f"Hub renamed to: {name}")
+            return JSONResponse({"ok": True})
+        return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
+
     @app.get("/api/hub/info")
     async def hub_info() -> JSONResponse:
         return JSONResponse({
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
             "port": port,
-            "ngrok_url": os.getenv("NGROK_URL"),
+            "hostname": getattr(app.state, "friendly_name", platform.node()),
+            "ngrok_url": app.state.ngrok_url or os.getenv("NGROK_URL"),
             "network_profile": await _get_network_profile()
         })
 
@@ -380,7 +449,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     if consecutive_failures > 30:  # ~1 second of failure
                         logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.1) # 100ms polling for faster signaling
                     continue
 
                 consecutive_failures = 0
@@ -426,7 +495,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     logger.error(f"Hub loop error: {e}")
                     _, frame_jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     hub_video_frame = frame_jpeg.tobytes()
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.01) # Reduced to ms for faster response
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")
         finally:
@@ -443,7 +512,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         logger.info(f"Toggle request: target={target}, lan_ip={lan_ip}, active={active}")
 
         # If target matches hub or is omitted, control local camera
-        is_hub = not target or target in ("localhost", "127.0.0.1", lan_ip)
+        ngrok_host = ""
+        if hasattr(app.state, "ngrok_url") and app.state.ngrok_url:
+            from urllib.parse import urlparse
+            ngrok_host = urlparse(app.state.ngrok_url).hostname
+
+        is_hub = not target or target in ("localhost", "127.0.0.1", lan_ip) or (ngrok_host and target == ngrok_host)
         
         if is_hub:
             if active and not app.state.camera_active:
@@ -475,7 +549,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     last_frame = hub_video_frame
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + hub_video_frame + b'\r\n')
-                await asyncio.sleep(0.016)  # ~60fps polling
+                await asyncio.sleep(0.01)  # Faster stream updates
         return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
     @app.get("/api/hub/camera/status")
@@ -638,17 +712,46 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.get("/api/settings")
     async def get_settings() -> JSONResponse:
         s = CONFIG.gesture.smoothing
-        sensitivity = int((s - 0.05) / 0.45 * 90 + 5)
+        vision_sensitivity = int((s - 0.05) / 0.45 * 90 + 5)
         return JSONResponse({
-            "sensitivity": sensitivity,
+            "sensitivity": vision_sensitivity,
+            "trackpad_sensitivity": CONFIG.gesture.trackpad_sensitivity,
             "scroll_speed": CONFIG.gesture.scroll_speed
         })
 
     @app.post("/api/settings")
     async def set_settings(payload: Annotated[dict, Body(...)]) -> JSONResponse:
-        sens, scroll = payload.get("sensitivity", 50), payload.get("scroll_speed", 20)
-        _save_settings(sens, scroll)
-        _load_settings() # Re-apply
+        sens = payload.get("sensitivity", 50)
+        scroll = payload.get("scroll_speed", 20)
+        
+        # If 'sensitivity' (0-100) is sent from mobile, map it to the 0.5-3.0 trackpad multiplier
+        # Otherwise use the provided trackpad_sensitivity or the current value.
+        if "trackpad_sensitivity" in payload:
+            tp_sens = float(payload["trackpad_sensitivity"])
+        else:
+            tp_sens = 0.5 + (sens / 100.0) * 2.5
+        
+        _save_settings(sens, scroll, tp_sens)
+        _load_settings() # Re-apply local
+        
+        # Propagate to discovered agents
+        import httpx
+        async def notify_agents():
+            for ip in discovery.discovered_devices:
+                try:
+                    async with httpx.AsyncClient(verify=False) as client:
+                        # Map 1.5 base to a 0-100 scale if agent expects "sensitivity"
+                        # Or just send trackpad_sensitivity directly
+                        await client.post(
+                            f"https://{ip}:8001/api/settings", 
+                            json={"trackpad_sensitivity": tp_sens},
+                            timeout=2.0
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to sync settings to Agent {ip}: {e}")
+        
+        asyncio.create_task(notify_agents())
+        
         return JSONResponse({"ok": True})
 
     @app.websocket("/ws")
@@ -661,14 +764,22 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         # Token validation IS the security gate.
         if not tokens.validate_token(token):
             logger.warning("WS rejected: invalid token from %s", client_ip)
+            await asyncio.sleep(0.1) # Debounced rejection
             await ws.close(code=4003)
             return
 
         await ws.accept()
         logger.info("WS accepted: client=%s", client_ip)
 
-        # AGENT RELAY LOGIC
-        if target and target != local_ip:
+        # If target matches local IP OR the ngrok hostname, it's a LOCAL path
+        ngrok_host = ""
+        if hasattr(app.state, "ngrok_url") and app.state.ngrok_url:
+            from urllib.parse import urlparse
+            ngrok_host = urlparse(app.state.ngrok_url).hostname
+
+        is_local = (target is None or target == local_ip or target == "localhost" or (ngrok_host and target == ngrok_host))
+
+        if not is_local:
             logger.info("RELAY PATH: proxying %s -> Agent %s", client_ip, target)
             agent_url = f"wss://{target}:8001/ws?token=hub_internal"
             # Create a permissive SSL context that accepts self-signed certificates.
@@ -760,7 +871,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     await asyncio.sleep(1.5)
                     if active_hub_dashboards <= 0:
                         logger.info("Local dashboard closed. Shutting down Hub...")
-                        os._exit(0)
+                        # os._exit(0)
+                        pass
                 asyncio.create_task(check_shutdown())
 
     async def _handle_vision_frame(ws, frame_bytes, vision, mouse):
@@ -798,6 +910,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             elif mtype == "shortcut":
                 res = mouse.handle_touch_shortcut(data.get("slot", ""))
                 await ws.send_json({"status": res})
+            elif mtype == "key":
+                key = data.get("key")
+                if key:
+                    res = mouse.handle_key(key)
+                    await ws.send_json({"status": res})
+            elif mtype == "hotkey":
+                keys = data.get("keys", [])
+                if keys:
+                    res = mouse.handle_hotkey(keys)
+                    await ws.send_json({"status": res})
         except Exception as e:
             logger.error("WS Message Error: %s", e)
 
@@ -805,7 +927,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     if MOBILE_DIST.exists():
         app.mount("/assets", StaticFiles(directory=str(MOBILE_DIST / "assets")), name="assets")
         @app.get("/")
-        async def index(): return FileResponse(MOBILE_DIST / "index.html")
+        async def index():
+            return FileResponse(MOBILE_DIST / "index.html")
+
         @app.get("/manifest.json")
         async def manifest(): return FileResponse(MOBILE_DIST / "manifest.json")
         @app.get("/sw.js")
@@ -815,15 +939,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         @app.get("/icon-512.png")
         async def icon512(): return FileResponse(MOBILE_DIST / "icon-512.png")
     
-    @app.get("/remote.html")
-    async def remote_page():
-        return FileResponse(CLIENT_HTML)
-
     @app.get("/mobile.html")
     async def mobile_page_alias():
-        if (MOBILE_DIST / "index.html").exists():
-            return FileResponse(MOBILE_DIST / "index.html")
-        return FileResponse(CLIENT_HTML) # Fallback
+        return FileResponse(MOBILE_DIST / "index.html")
     
     @app.get("/hub")
     async def hub_page():
@@ -833,7 +951,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
             "port": port,
-            "ngrok_url": os.getenv("NGROK_URL")
+            "ngrok_url": app.state.ngrok_url or os.getenv("NGROK_URL")
         }
         # Fix: assign to window.infoData so fetchUpdates() can read it across the script
         injection = f"window.infoData = {json.dumps(info)};"

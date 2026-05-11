@@ -6,8 +6,10 @@ let activePC: any = null;
 let devices: any[] = [];
 let authToken = localStorage.getItem("gesturelink_token");
 let hapticsEnabled = localStorage.getItem("gesturelink_haptics") !== "false";
+
 // WebRTC State
 let peerConn: RTCPeerConnection | null = null;
+let dataChannel: RTCDataChannel | null = null;
 let myPeerId = Math.random().toString(36).substring(7);
 
 // DOM Elements
@@ -29,6 +31,10 @@ const appSelect = document.getElementById("appSelect") as HTMLSelectElement;
 const customTarget = document.getElementById("customTarget") as HTMLInputElement;
 const saveAppShortcut = document.getElementById("saveAppShortcut")!;
 const closeAppModal = document.getElementById("closeAppModal")!;
+const keyboardInput = document.getElementById("keyboardInput") as HTMLInputElement;
+const copyBtn = document.getElementById("copyBtn")!;
+const pasteBtn = document.getElementById("pasteBtn")!;
+const kbBtn = document.getElementById("kbBtn")!;
 
 // --- Initialization ---
 async function init() {
@@ -36,9 +42,13 @@ async function init() {
   setupTouchpad();
   setupPinInputs();
   setupShortcuts();
+<<<<<<< HEAD
 
   // Issue 8 fix: removed duplicate logoutBtn.onclick here.
   // The event listener at line ~105 handles logout with a confirm dialog.
+=======
+  setupKeyboardToolbar();
+>>>>>>> feature/ngrok-tunnel
 
   closeAppModal.onclick = () => {
     appModal.style.display = 'none';
@@ -79,13 +89,18 @@ async function init() {
     pairingOverlay.style.display = 'flex';
   }
 
+<<<<<<< HEAD
   // Toggles
+=======
+  // Haptic toggle
+>>>>>>> feature/ngrok-tunnel
   document.getElementById("hapticToggle")?.addEventListener('change', (e: any) => {
     hapticsEnabled = e.target.checked;
     localStorage.setItem("gesturelink_haptics", hapticsEnabled.toString());
     if (hapticsEnabled) triggerHaptic();
   });
 
+  // Camera toggle
   const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
   pcCameraToggle?.addEventListener('change', async (e: any) => {
     if (!activePC) {
@@ -145,7 +160,7 @@ async function init() {
     if (ip) addDeviceToList(ip, "Manual PC");
   };
 
-  // Bug 4: Scan Network via discovered endpoint
+  // Scan Network
   const scanBtn = document.getElementById("scanBtn");
   const scanRipple = document.getElementById("scanRipple");
   scanBtn?.addEventListener('click', async () => {
@@ -163,7 +178,6 @@ async function init() {
         }
       });
       if (!foundNew && Object.keys(discovered).length > 0) {
-        // Just re-render if we found things but they were already there
         renderDeviceList();
       }
     } finally {
@@ -203,19 +217,25 @@ function addDeviceToList(ip: string, hostname: string) {
 
 function renderDeviceList() {
   if (devices.length === 0) {
-    deviceList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">Tap Scan to discover PCs</div>';
+    deviceList.innerHTML = `
+      <div class="empty-state">
+        <i class="fas fa-satellite-dish"></i>
+        <span>Tap Scan to discover PCs</span>
+      </div>`;
     return;
   }
   deviceList.innerHTML = devices.map((d, i) => {
     const isActive = activePC?.ip === d.ip;
     return `
-    <div id="device-card-${i}" style="display: flex; justify-content: space-between; align-items: center; padding: 14px; background: var(--glass); border-radius: 14px; border: 1px solid ${isActive ? 'rgba(0,255,149,0.3)' : 'var(--border)'}; transition: all 0.2s;">
-      <div style="flex:1; min-width:0;">
-        <div style="font-weight: 600; font-size: 0.9rem; display:flex; align-items:center; gap:6px;">
-          <span id="device-name-${i}" style="cursor:pointer; border-bottom: 1px dashed rgba(255,255,255,0.2);" onclick="globalThis.renameDevice(${i})" title="Tap to rename">${d.hostname}</span>
-          <span style="font-size:0.6rem; color:var(--text-secondary); opacity:0.5;">✏️</span>
+    <div id="device-card-${i}" style="display: flex; justify-content: space-between; align-items: center; padding: 14px; background: var(--glass); border-radius: 14px; border: 1px solid ${isActive ? 'rgba(0,255,149,0.3)' : 'var(--border)'}; margin-bottom: 8px; transition: all 0.2s;">
+      <div style="display: flex; align-items: center; gap: 12px; flex:1; min-width:0;">
+        <div class="device-icon" style="width:38px; height:38px; font-size:1rem;">💻</div>
+        <div style="min-width:0;">
+          <div style="font-weight: 600; font-size: 0.88rem; display:flex; align-items:center; gap:6px;">
+            <span id="device-name-${i}" style="cursor:pointer; text-decoration: underline; text-decoration-style: dashed; text-underline-offset: 3px; text-decoration-color: rgba(255,255,255,0.2);" onclick="globalThis.renameDevice(${i})" title="Tap to rename">${d.hostname}</span>
+          </div>
+          <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px; font-family: monospace;">${d.ip}</div>
         </div>
-        <div style="font-size: 0.7rem; color: var(--text-secondary);">${d.ip}</div>
       </div>
       <button id="connect-btn-${i}" onclick="globalThis.connectToPC(${i})" class="device-connect-btn ${isActive ? 'connected' : ''}">${isActive ? '✓ Active' : 'Connect'}</button>
     </div>`;
@@ -246,10 +266,9 @@ globalThis.connectToPC = async (i: number) => {
   const d = devices[i];
   if (!d) return;
 
-  // Bug 5: animate connecting state
   const connectBtn = document.getElementById(`connect-btn-${i}`);
   if (connectBtn) {
-    connectBtn.textContent = 'Connecting';
+    connectBtn.textContent = 'Connecting…';
     connectBtn.classList.add('connecting');
   }
 
@@ -271,7 +290,7 @@ globalThis.connectToPC = async (i: number) => {
     ws.onerror = (err) => {
       console.error("WS Connection Error", err);
       alert(`⚠️ Could not connect to ${d.hostname}. Ensure the Agent is running and on the same network.`);
-      renderDeviceList(); // Reset UI state
+      renderDeviceList();
     };
 
     ws.onclose = (event) => {
@@ -279,7 +298,6 @@ globalThis.connectToPC = async (i: number) => {
       if (activePC === d) {
         connBadge.textContent = "OFFLINE";
         connBadge.classList.remove('online');
-        // Bug 2: if token rejected (4003), force re-pair
         if (event.code === 4003 || event.code === 1008) {
           localStorage.removeItem("gesturelink_token");
           authToken = null;
@@ -295,7 +313,6 @@ globalThis.connectToPC = async (i: number) => {
       if (activePC !== d) return;
       try {
         const data = JSON.parse(msg.data);
-        // Handle relay error from Hub (agent unreachable)
         if (data.type === 'error') {
           connBadge.textContent = 'ERROR';
           connBadge.classList.remove('online');
@@ -326,11 +343,14 @@ async function initWebRTC() {
     if (e.candidate) sendSignal({ type: "candidate", candidate: e.candidate });
   };
 
+  dataChannel = peerConn.createDataChannel("commands", { ordered: false, maxRetransmits: 0 });
+  dataChannel.onopen = () => console.log("WebRTC DataChannel OPEN! (0-latency mode active)");
+  dataChannel.onclose = () => dataChannel = null;
+
   const offer = await peerConn.createOffer();
   await peerConn.setLocalDescription(offer);
   sendSignal({ type: "offer", sdp: offer.sdp });
 
-  // Signaling loop
   (async () => {
     while (peerConn) {
       try {
@@ -341,14 +361,15 @@ async function initWebRTC() {
           else if (data.signal.type === "candidate") await peerConn.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
         }
       } catch (e) { }
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 100)); // 100ms polling for instant handshake
     }
   })();
 }
 
 async function sendSignal(data: any) {
   await fetch(`/api/webrtc/signal/hub_pc`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ from: myPeerId, ...data })
   });
 }
@@ -359,11 +380,13 @@ async function activatePC(d: any) {
   activeDeviceIP.textContent = d.ip;
   connBadge.textContent = "ONLINE";
   connBadge.classList.add('online');
-  // Bug 2: show disconnect button when connected
   document.getElementById('disconnectBtn')?.classList.add('visible');
   syncSettings();
 
+<<<<<<< HEAD
   // Initial mode and camera sync
+=======
+>>>>>>> feature/ngrok-tunnel
   try {
     const [modeRes, camRes] = await Promise.all([
       fetch(`${location.origin}/api/hub/mode`).then(r => r.json()),
@@ -378,10 +401,17 @@ async function activatePC(d: any) {
 
     const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
     if (pcCameraToggle) pcCameraToggle.checked = camRes.active;
+<<<<<<< HEAD
     const remoteGestureStatus = document.getElementById("remoteGestureStatus");
     if (remoteGestureStatus) remoteGestureStatus.textContent = camRes.active ? "CAMERA ON" : "CAMERA OFF";
 
   } catch (_) { }
+=======
+    const gestureStatusEl = document.getElementById("remoteGestureStatus");
+    if (gestureStatusEl) gestureStatusEl.textContent = camRes.active ? "CAMERA ON" : "CAMERA OFF";
+
+  } catch (_) {}
+>>>>>>> feature/ngrok-tunnel
 }
 
 async function syncSettings() {
@@ -393,14 +423,21 @@ async function syncSettings() {
     ]);
     const sens = document.getElementById("sensRange") as HTMLInputElement;
     const scroll = document.getElementById("scrollRange") as HTMLInputElement;
-    if (sens) sens.value = setRes.sensitivity || 50;
-    if (scroll) scroll.value = setRes.scroll_speed || 12;
+    const sensVal = document.getElementById("sensVal");
+    const scrollVal = document.getElementById("scrollVal");
+    if (sens) {
+      sens.value = setRes.sensitivity || 50;
+      if (sensVal) sensVal.textContent = sens.value;
+    }
+    if (scroll) {
+      scroll.value = setRes.scroll_speed || 12;
+      if (scrollVal) scrollVal.textContent = scroll.value;
+    }
     renderShortcuts(shortcutsRes.shortcuts || {});
   } catch (_) { }
 }
 
 function renderShortcuts(shortcuts: Record<string, any>) {
-  // Update the shortcut key display from server data
   document.querySelectorAll<HTMLElement>('[data-shortcut]').forEach(el => {
     const key = el.dataset.shortcut!;
     if (shortcuts[key]) {
@@ -412,37 +449,111 @@ function renderShortcuts(shortcuts: Record<string, any>) {
 
 // @ts-ignore
 globalThis.editShortcut = async (slot: string) => {
-  const modal = document.getElementById("appModal")!;
-  const select = document.getElementById("appSelect") as HTMLSelectElement;
-  const customInput = document.getElementById("customTarget") as HTMLInputElement;
-  const saveBtn = document.getElementById("saveAppShortcut")!;
-  const closeBtn = document.getElementById("closeAppModal")!;
+  activeShortcutSlot = slot;
+  appModal.style.display = 'flex';
 
-  // Reset modal
-  select.innerHTML = '<option value="">-- Choose from device --</option>';
-  customInput.value = "";
-  modal.style.display = 'flex';
-
-  // Fetch apps from active device via Hub proxy
   try {
-    const ip = activePC?.ip || location.hostname;
-    const res = await fetch(`${location.origin}/api/apps?ip=${ip}`);
+    const targetIp = activePC ? activePC.ip : "";
+    const res = await fetch(`${location.origin}/api/apps?ip=${targetIp}`);
     const data = await res.json();
-    (data.apps || []).forEach((app: any) => {
+    appSelect.innerHTML = '<option value="">— Choose from device —</option>';
+    data.apps.forEach((app: any) => {
       const opt = document.createElement("option");
       opt.value = app.target;
       opt.textContent = app.name;
-      select.appendChild(opt);
+      appSelect.appendChild(opt);
     });
-  } catch (e) { console.error("Failed to fetch apps", e); }
+  } catch (e) {
+    console.error("Failed to load apps", e);
+  }
+};
 
+<<<<<<< HEAD
   closeBtn.onclick = () => modal.style.display = 'none';
 
   saveBtn.onclick = async () => {
     const target = customInput.value || select.value;
     if (!target) return;
+=======
+let activeShortcutSlot = "";
+>>>>>>> feature/ngrok-tunnel
 
+saveAppShortcut.onclick = async () => {
+  const target = customTarget.value.trim() || appSelect.value;
+  if (!target) { alert("Please select or type an app/command."); return; }
+
+  try {
+    const res = await fetch(`${location.origin}/api/shortcuts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shortcuts: { [activeShortcutSlot]: { target, enabled: true } } })
+    });
+    if (!res.ok) throw new Error("Server error");
+
+    const keyEl = document.querySelector(`.shortcut-key[data-shortcut="${activeShortcutSlot}"]`);
+    if (keyEl) keyEl.textContent = target;
+
+    appModal.style.display = 'none';
+    customTarget.value = "";
+    triggerHaptic(ImpactStyle.Medium);
+  } catch (_) {
+    alert("Failed to save shortcut. Check connection.");
+  }
+};
+
+async function startApp() {
+  // Get hub info to find the Local LAN IP
+  try {
+    const res = await fetch(`${location.origin}/api/hub/info`);
+    const data = await res.json();
+    
+    // 1. Add the current domain (could be ngrok)
+    addDeviceToList(location.hostname, "Hub (Cloud Tunnel)");
+    
+    // 2. Add the Local LAN IP (if different)
+    if (data.lan_ip && data.lan_ip !== location.hostname) {
+      addDeviceToList(data.lan_ip, "Hub (Local LAN)");
+    }
+
+    // AUTO-CONNECT STRATEGY:
+    // If we are on the LAN IP already, just connect.
+    // If we are on ngrok, try to "probe" the LAN IP.
+    if (data.lan_ip && location.hostname !== data.lan_ip) {
+       console.log("Probing Local LAN for zero-latency fallback...");
+       try {
+         const probe = await fetch(`https://${data.lan_ip}:${data.port}/api/ping`, { signal: AbortSignal.timeout(1000) });
+         if (probe.ok) {
+           console.log("Local LAN reached! Switching to 0-latency mode.");
+           // Find the index of the LAN device
+           const lanIdx = devices.findIndex(d => d.ip === data.lan_ip);
+           if (lanIdx !== -1) {
+             // @ts-ignore
+             globalThis.connectToPC(lanIdx);
+             return;
+           }
+         }
+       } catch (e) {
+         console.log("Local LAN not reachable (different network). Staying on Cloud Tunnel.");
+       }
+    }
+
+    // Fallback: connect to the device at index 0 (usually the current domain)
+    // @ts-ignore
+    globalThis.connectToPC(0);
+
+  } catch (e) {
+    console.error("Hybrid start failed:", e);
+    addDeviceToList(location.hostname, "Hub (Primary)");
+    // @ts-ignore
+    globalThis.connectToPC(0);
+  }
+}
+
+async function logout() {
+  const token = localStorage.getItem("gesturelink_token");
+  if (token) {
     try {
+<<<<<<< HEAD
       const res = await fetch(`${location.origin}/api/shortcuts`);
       const data = await res.json();
       const shortcuts = data.shortcuts || {};
@@ -450,17 +561,208 @@ globalThis.editShortcut = async (slot: string) => {
       shortcuts[slot] = { target, mode: target.startsWith('http') ? 'url' : 'app' };
 
       await fetch(`${location.origin}/api/shortcuts`, {
+=======
+      await fetch(`${location.origin}/api/logout`, {
+>>>>>>> feature/ngrok-tunnel
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shortcuts })
+        body: JSON.stringify({ token })
       });
+<<<<<<< HEAD
 
       renderShortcuts(shortcuts);
       triggerHaptic(ImpactStyle.Medium);
       modal.style.display = 'none';
     } catch (e) { alert("Failed to update shortcut"); }
+=======
+    } catch (_) { /* best effort */ }
+  }
+  localStorage.removeItem("gesturelink_token");
+  localStorage.removeItem("gesturelink_ip");
+  location.reload();
+}
+
+async function triggerHaptic(style: ImpactStyle = ImpactStyle.Light) {
+  if (!hapticsEnabled) return;
+  if (navigator.vibrate) navigator.vibrate(style === ImpactStyle.Heavy ? 40 : 15);
+}
+
+function setupTouchpad() {
+  let lastX = 0, lastY = 0, startTime = 0;
+  let lastTapTime = 0;
+  let maxFingers = 0;
+  let lastPinchDist = 0;
+  let lastMoveTime = 0;
+  let isMoving = false;
+  let isDragging = false;
+  let twoFingerStarted = false;
+  let twoFingerMidY = 0;
+
+  touchZone.addEventListener('touchstart', (e: any) => {
+    maxFingers = Math.max(maxFingers, e.touches.length);
+    lastX = e.touches[0].clientX;
+    lastY = e.touches[0].clientY;
+    startTime = Date.now();
+    isMoving = false;
+
+    if (e.touches.length === 2) {
+      twoFingerStarted = true;
+      twoFingerMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    } else if (e.touches.length === 1) {
+      twoFingerStarted = false;
+    }
+
+    if (e.touches.length === 1 && (startTime - lastTapTime) < 300) {
+      isDragging = true;
+      sendCommand({ type: 'click_down', button: 'left' });
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  touchZone.addEventListener('touchmove', (e: any) => {
+    isMoving = true;
+    maxFingers = Math.max(maxFingers, e.touches.length);
+
+    if (e.touches.length >= 2 && !twoFingerStarted) {
+      twoFingerStarted = true;
+      twoFingerMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+
+    if (twoFingerStarted && e.touches.length >= 2) {
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const currentMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      const pinchDelta = currentDist - lastPinchDist;
+
+      if (Math.abs(pinchDelta) > 8) {
+        if (activePC?.ws?.readyState === 1) {
+          activePC.ws.send(JSON.stringify({ type: 'zoom', delta: pinchDelta }));
+        }
+        lastPinchDist = currentDist;
+      } else {
+        const scrollDy = currentMidY - twoFingerMidY;
+        if (Math.abs(scrollDy) > 2 && activePC?.ws?.readyState === 1) {
+          activePC.ws.send(JSON.stringify({ type: 'scroll', dy: scrollDy * -1.5 }));
+        }
+      }
+      twoFingerMidY = currentMidY;
+      lastPinchDist = currentDist;
+
+    } else if (!twoFingerStarted && e.touches.length === 1 && !isDragging) {
+      const now = Date.now();
+      if (now - lastMoveTime < 16) {
+        e.preventDefault();
+        return;
+      }
+      const dx = e.touches[0].clientX - lastX;
+      const dy = e.touches[0].clientY - lastY;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+      sendCommand({ type: 'move', dx, dy });
+      lastMoveTime = now;
+    } else if (!twoFingerStarted && e.touches.length === 1 && isDragging) {
+      const dx = e.touches[0].clientX - lastX;
+      const dy = e.touches[0].clientY - lastY;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+      sendCommand({ type: 'move', dx, dy });
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  touchZone.addEventListener('touchend', (e: any) => {
+    if (e.touches.length > 0) return;
+
+    const now = Date.now();
+    const duration = now - startTime;
+
+    if (isDragging) {
+      isDragging = false;
+      if (activePC?.ws?.readyState === 1) {
+        activePC.ws.send(JSON.stringify({ type: 'click_up', button: 'left' }));
+      }
+    } else if (duration < 250 && !isMoving) {
+      if (activePC?.ws?.readyState === 1 && maxFingers < 3) {
+        const button = maxFingers === 2 ? 'right' : 'left';
+        activePC.ws.send(JSON.stringify({ type: 'click', button }));
+        triggerHaptic(maxFingers === 2 ? ImpactStyle.Medium : ImpactStyle.Light);
+      }
+      lastTapTime = now;
+    } else if (duration >= 1000 && !isMoving) {
+      if (activePC?.ws?.readyState === 1 && (maxFingers === 3 || maxFingers === 4)) {
+        activePC.ws.send(JSON.stringify({ type: 'shortcut', slot: `touch_${maxFingers}_finger` }));
+        triggerHaptic(ImpactStyle.Heavy);
+      }
+    } else {
+      lastTapTime = 0;
+    }
+
+    if (e.touches.length === 0) {
+      maxFingers = 0;
+      twoFingerStarted = false;
+    }
+  });
+}
+
+function setupKeyboardToolbar() {
+  kbBtn.onclick = () => {
+    keyboardInput.focus();
+    triggerHaptic(ImpactStyle.Light);
+>>>>>>> feature/ngrok-tunnel
   };
-};
+
+  copyBtn.onclick = () => {
+    sendHotkey(['ctrl', 'c']);
+  };
+
+  pasteBtn.onclick = () => {
+    sendHotkey(['ctrl', 'v']);
+  };
+
+  keyboardInput.addEventListener('keydown', (e) => {
+    if (!activePC?.ws || activePC.ws.readyState !== 1) return;
+    if (["Backspace", "Enter", "Tab", "Escape"].includes(e.key)) {
+      activePC.ws.send(JSON.stringify({ type: 'key', key: e.key }));
+      e.preventDefault();
+    }
+  });
+
+  keyboardInput.addEventListener('input', () => {
+    if (!activePC?.ws || activePC.ws.readyState !== 1) return;
+    const val = keyboardInput.value;
+    if (val.length > 0) {
+      activePC.ws.send(JSON.stringify({ type: 'key', key: val }));
+      keyboardInput.value = '';
+    }
+  });
+}
+
+function sendHotkey(keys: string[]) {
+  sendCommand({ type: 'hotkey', keys });
+  triggerHaptic(ImpactStyle.Medium);
+}
+
+function sendCommand(data: any) {
+  const msg = JSON.stringify(data);
+  // Priority 1: WebRTC DataChannel (P2P, Zero Latency)
+  if (dataChannel && dataChannel.readyState === "open") {
+    dataChannel.send(msg);
+  } 
+  // Priority 2: Standard WebSocket (Fallback)
+  else if (activePC?.ws?.readyState === 1) {
+    activePC.ws.send(msg);
+  }
+}
 
 async function saveSettings() {
   if (!activePC) return;
@@ -468,7 +770,12 @@ async function saveSettings() {
     const sens = (document.getElementById("sensRange") as HTMLInputElement).value;
     const scroll = (document.getElementById("scrollRange") as HTMLInputElement).value;
     await fetch(`${location.origin}/api/settings`, {
+<<<<<<< HEAD
       method: "POST", headers: { "Content-Type": "application/json" },
+=======
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+>>>>>>> feature/ngrok-tunnel
       body: JSON.stringify({
         sensitivity: Number.parseInt(sens),
         scroll_speed: Number.parseInt(scroll)
@@ -480,27 +787,36 @@ async function saveSettings() {
 }
 
 function setupPinInputs() {
-  pinInputs.forEach((input, i) => {
-    input.addEventListener('input', () => {
-      if (input.value && i < 5) pinInputs[i + 1].focus();
-    });
+  // Remove any duplicate input handler by cloning (the inline script in HTML handles focus only)
+  pinInputs.forEach((input) => {
+    // Only attach the pair-on-complete behavior; focus is handled by inline script
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Backspace' && !input.value && i > 0) pinInputs[i - 1].focus();
+      if (e.key === 'Enter') pairBtn.click();
     });
   });
+
   pairBtn.onclick = async () => {
     const pin = Array.from(pinInputs).map(i => i.value).join("");
     await autoPair(pin);
   };
 }
 
+async function setupShortcuts() {
+  try {
+    const res = await fetch(`${location.origin}/api/shortcuts`);
+    const data = await res.json();
+    renderShortcuts(data.shortcuts || {});
+  } catch (_) { /* use defaults */ }
+}
+
 async function autoPair(pin: string) {
   if (pin.length !== 6) return;
-  pairStatusText.textContent = "Verifying PIN...";
+  pairStatusText.textContent = "Verifying PIN…";
 
   try {
     const res = await fetch(`${location.origin}/api/pair`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pin, hostname: "Mobile Controller" })
     });
     const data = await res.json();
@@ -508,7 +824,7 @@ async function autoPair(pin: string) {
     if (data.status === "approved" && data.token) {
       finalizePairing(data.token);
     } else if (data.status === "pending") {
-      pairStatusText.textContent = "Waiting for Hub approval...";
+      pairStatusText.textContent = "Waiting for Hub approval…";
       pollPairingStatus(data.request_id);
     } else {
       pairError.style.opacity = '1';
@@ -551,6 +867,7 @@ async function pollPairingStatus(reqId: string) {
   }, 2000);
 }
 
+<<<<<<< HEAD
 // Issue 6 fix: setupShortcuts only does initial load of labels.
 // editShortcut is handled by the globalThis.editShortcut below (line ~326).
 async function setupShortcuts() {
@@ -796,4 +1113,6 @@ function setupTouchpad() {
   });
 }
 
+=======
+>>>>>>> feature/ngrok-tunnel
 init();

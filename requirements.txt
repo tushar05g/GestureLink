@@ -22,3 +22,5 @@ python-multipart>=0.0.6
 Pillow>=9.5.0
 pystray>=0.19.5
 pyperclip>=1.8.2
+pyinstaller==6.5.0
+pyngrok
