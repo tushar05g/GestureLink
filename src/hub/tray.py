@@ -198,21 +198,19 @@ class GestureLinkTray:
             self.icon.stop()
 
     def run_server(self):
-        from src.core.utils import resource_path
+        # We now default to HTTP for the local server to avoid 'Self-Signed' SSL trust issues on mobile hotspots.
+        # Cloudflare Tunnel will still provide a valid HTTPS URL for the remote web app.
         ssl_params = {}
-        cert_path = resource_path("cert.pem")
-        key_path  = resource_path("key.pem")
-        if cert_path.exists() and key_path.exists():
-            ssl_params = {
-                "ssl_certfile": str(cert_path),
-                "ssl_keyfile":  str(key_path)
-            }
+        
+        # Only use SSL if explicitly requested or if we are in a production custom-domain setup
+        # if os.getenv("FORCE_SSL") == "true":
+        #    ... (logic to re-enable)
         
         uvicorn.run(
-            self.app, 
-            host=self.host, 
-            port=self.port, 
-            log_level="info",
+            "src.hub.server:build_app",
+            factory=True,
+            host="0.0.0.0",
+            port=self.port,
             **ssl_params
         )
 

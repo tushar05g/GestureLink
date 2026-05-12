@@ -229,12 +229,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     # Prioritize HUB_URL from .env if it exists
                     app.state.cloudflare_url = os.getenv("HUB_URL")
                 else:
-                    # Quick Tunnel (trycloudflare.com)
-                    local_proto = "https" if (CERT_PEM.exists() and KEY_PEM.exists()) else "http"
+                    # We now force HTTP for the local origin to simplify hotspot connectivity.
+                    # Cloudflare still provides HTTPS on the outer tunnel URL.
+                    local_proto = "http" 
                     print(f"  * Attempting Quick Tunnel: {local_proto}://127.0.0.1:{port}")
                     tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://127.0.0.1:{port}"]
-                    if local_proto == "https":
-                        tunnel_args.extend(["--no-tls-verify", "--origin-server-name", "localhost"])
+                    # No TLS verify needed for HTTP
+                    # if local_proto == "https":
+                    #    tunnel_args.extend(["--no-tls-verify", "--origin-server-name", "localhost"])
                     
                     print(f"  * Command: {' '.join(tunnel_args)}")
 
@@ -770,7 +772,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "hub_id": f"GL-HUB-{platform.node()}",
             "local_ip": detect_lan_ip(),
             "cloudflare_url": getattr(app.state, "cloudflare_url", None),
-            "ssl_active": CERT_PEM.exists() and KEY_PEM.exists(),
+            "ssl_active": False, # Local Hub is now HTTP for hotspot compatibility
             "pin": tokens.current_pin
         }
 
@@ -1220,7 +1222,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             target = f"{frontend_base.rstrip('/')}/?hub={host}"
         else:
             # HUB is running on localhost or LAN -> show direct IP link
-            proto = "https" if CERT_PEM.exists() else "http"
+            # We now use http for local connections to avoid SSL trust issues on hotspots
+            proto = "http"
             lan_ip = detect_lan_ip()
             target = f"{proto}://{lan_ip}:{port}"
             
