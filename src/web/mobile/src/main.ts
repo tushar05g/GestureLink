@@ -128,8 +128,21 @@ async function init() {
 
   async function setupHubWebRTC() {
     closeWebRTC(); // Reset
+    
+    // Enhanced ICE configuration for hotspot support
+    const iceServers = [
+      { urls: ["stun:stun.l.google.com:19302"] },
+      { urls: ["stun:stun1.l.google.com:19302"] },
+      // TURN server for double-NAT traversal (hotspot fallback)
+      {
+        urls: ["turn:numb.viagenie.ca"],
+        username: "webrtc@example.com",
+        credential: "webrtcpassword"
+      }
+    ];
+    
     peerConn = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        iceServers: iceServers
     });
 
     dataChannel = peerConn.createDataChannel("gestures", { ordered: false });
@@ -309,12 +322,21 @@ globalThis.connectToPC = async (i: number) => {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${proto}//${location.host}/ws?token=${authToken}&target=${d.ip}`;
 
+  console.log(`[DEBUG] Connecting to device #${i}:`, {
+    hostname: d.hostname,
+    ip: d.ip,
+    wsUrl: wsUrl,
+    protocol: proto,
+    authToken: authToken?.substring(0, 8) + "..."
+  });
+
   try {
     if (d.ws) d.ws.close();
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+      console.log(`✅ WebSocket connected to ${d.hostname} (${d.ip})`);
       d.ws = ws;
       activatePC(d);
       initWebRTC();
@@ -322,17 +344,34 @@ globalThis.connectToPC = async (i: number) => {
     };
 
     ws.onerror = (err) => {
-      console.error("WS Connection Error", err);
-      alert(`⚠️ Could not connect to ${d.hostname}. Ensure the Agent is running and on the same network.`);
+      console.error("[DEBUG] WebSocket Connection Error:", err);
+      console.error("[DEBUG] Network Details:", {
+        location: location.origin,
+        target_ip: d.ip,
+        protocol: proto,
+        hostname: location.hostname,
+        wsUrl: wsUrl
+      });
+      alert(`⚠️ Could not connect to ${d.hostname}.\n\nEnsure the Hub is running and on the same network.`);
+      if (connectBtn) {
+        connectBtn.textContent = 'Connect';
+        connectBtn.classList.remove('connecting');
+      }
       renderDeviceList();
     };
 
     ws.onclose = (event) => {
+      console.log(`📴 WebSocket closed for ${d.hostname}:`, {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean
+      });
       d.ws = null;
       if (activePC === d) {
         connBadge.textContent = "OFFLINE";
         connBadge.classList.remove('online');
         if (event.code === 4003 || event.code === 1008) {
+          console.log("Token rejected - forcing re-pair");
           localStorage.removeItem("gesturelink_token");
           authToken = null;
           pairingOverlay.style.display = 'flex';
@@ -348,6 +387,7 @@ globalThis.connectToPC = async (i: number) => {
       try {
         const data = JSON.parse(msg.data);
         if (data.type === 'error') {
+          console.error("[DEBUG] Server error:", data.message);
           connBadge.textContent = 'ERROR';
           connBadge.classList.remove('online');
           alert(`⚠️ ${data.message || 'Connection error'}`);
@@ -360,7 +400,8 @@ globalThis.connectToPC = async (i: number) => {
         }
       } catch (_) { }
     };
-  } catch (_) {
+  } catch (err) {
+    console.error("[DEBUG] WebSocket Creation Error:", err);
     if (connectBtn) {
       connectBtn.textContent = 'Connect';
       connectBtn.classList.remove('connecting');
@@ -371,7 +412,20 @@ globalThis.connectToPC = async (i: number) => {
 
 async function initWebRTC() {
   if (peerConn) peerConn.close();
-  peerConn = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  
+  // Enhanced ICE configuration for hotspot support
+  const iceServers = [
+    { urls: ["stun:stun.l.google.com:19302"] },
+    { urls: ["stun:stun1.l.google.com:19302"] },
+    // TURN server for double-NAT traversal (hotspot fallback)
+    {
+      urls: ["turn:numb.viagenie.ca"],
+      username: "webrtc@example.com",
+      credential: "webrtcpassword"
+    }
+  ];
+  
+  peerConn = new RTCPeerConnection({ iceServers });
 
   peerConn.onicecandidate = (e) => {
     if (e.candidate) sendSignal({ type: "candidate", candidate: e.candidate });
@@ -537,14 +591,23 @@ async function startApp() {
     }
 
     // AUTO-CONNECT STRATEGY:
-    // If we are on the LAN IP already, just connect.
-    // If we are on ngrok, try to "probe" the LAN IP.
+    // Try zero-latency direct connection first (LAN), then fall back to tunnel
     if (data.lan_ip && location.hostname !== data.lan_ip) {
-       console.log("Probing Local LAN for zero-latency fallback...");
+       console.log("🔍 Probing Local LAN for zero-latency fallback...");
        try {
-         const probe = await fetch(`https://${data.lan_ip}:${data.port}/api/ping`, { signal: AbortSignal.timeout(1000) });
+         // Use protocol and port from hub info response
+         const proto = data.ssl_active ? "https" : "http";
+         const port = data.port || 8000;
+         const lanUrl = `${proto}://${data.lan_ip}:${port}/api/ping`;
+         console.log(`[DEBUG] LAN Probe URL: ${lanUrl}`);
+         
+         const probe = await fetch(lanUrl, { 
+           signal: AbortSignal.timeout(1000),
+           headers: { 'Accept': 'application/json' }
+         });
+         
          if (probe.ok) {
-           console.log("Local LAN reached! Switching to 0-latency mode.");
+           console.log("✅ Local LAN reached! Switching to 0-latency mode.");
            // Find the index of the LAN device
            const lanIdx = devices.findIndex(d => d.ip === data.lan_ip);
            if (lanIdx !== -1) {
@@ -553,12 +616,14 @@ async function startApp() {
              return;
            }
          }
-       } catch (e) {
-         console.log("Local LAN not reachable (different network). Staying on Cloud Tunnel.");
+       } catch (e: any) {
+         console.log(`⚠️  Local LAN probe failed (${e.message}). Falling back to Cloud Tunnel.`);
+         console.log(`[DEBUG] Error details:`, e);
        }
     }
 
-    // Fallback: connect to the device at index 0 (usually the current domain)
+    // Fallback: connect to the device at index 0 (usually the current domain / cloud tunnel)
+    console.log("📡 Using Cloud Tunnel (Cloudflare)");
     // @ts-ignore
     globalThis.connectToPC(0);
 

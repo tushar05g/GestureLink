@@ -269,14 +269,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     # Prioritize HUB_URL from .env if it exists
                     app.state.cloudflare_url = os.getenv("HUB_URL")
                 else:
-                    # We now force HTTP for the local origin to simplify hotspot connectivity.
-                    # Cloudflare still provides HTTPS on the outer tunnel URL.
-                    local_proto = "http" 
+                    # Use HTTPS with self-signed certificate for tunnel compatibility
+                    # Cloudflare requires HTTPS to the origin (even if self-signed)
+                    local_proto = "https" 
                     print(f"  * Attempting Quick Tunnel: {local_proto}://127.0.0.1:{port}")
                     tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://127.0.0.1:{port}"]
-                    # No TLS verify needed for HTTP
-                    # if local_proto == "https":
-                    #    tunnel_args.extend(["--no-tls-verify", "--origin-server-name", "localhost"])
+                    # Allow self-signed cert for local tunnel connection
+                    tunnel_args.extend(["--no-tls-verify", "--origin-server-name", "localhost"])
                     
                     print(f"  * Command: {' '.join(tunnel_args)}")
 
@@ -761,12 +760,19 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def webrtc_offer(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
         
-        # Add STUN servers to bypass hotspot/firewall restrictions
+        # Add STUN + TURN servers for hotspot/double-NAT traversal
         pc = RTCPeerConnection(configuration={
             "iceServers": [
+                # STUN servers (single-NAT traversal)
                 {"urls": ["stun:stun.l.google.com:19302"]},
                 {"urls": ["stun:stun1.l.google.com:19302"]},
-                {"urls": ["stun:stun2.l.google.com:19302"]}
+                {"urls": ["stun:stun2.l.google.com:19302"]},
+                # TURN servers (double-NAT fallback for hotspots)
+                {
+                    "urls": ["turn:numb.viagenie.ca"],
+                    "username": "webrtc@example.com",
+                    "credential": "webrtcpassword"
+                }
             ]
         })
         setup_pc(pc)
@@ -814,8 +820,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "hostname": app.state.friendly_name,
             "hub_id": f"GL-HUB-{platform.node()}",
             "local_ip": detect_lan_ip(),
+            "port": port,
             "cloudflare_url": getattr(app.state, "cloudflare_url", None),
-            "ssl_active": False, # Local Hub is now HTTP for hotspot compatibility
+            "ssl_active": CERT_PEM.exists(),
             "pin": tokens.current_pin
         }
 
