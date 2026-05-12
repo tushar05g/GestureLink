@@ -1127,24 +1127,39 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         return HTMLResponse(content)
 
     @app.get("/lan-qr.png")
-    async def qr_gen(url: Optional[str] = None, pin: Optional[str] = None) -> StreamingResponse:
+    async def qr_gen(request: Request, url: Optional[str] = None, pin: Optional[str] = None) -> StreamingResponse:
         frontend_base = os.getenv("FRONTEND_URL")
-        logger.info(f"QR Request - FRONTEND_URL: {frontend_base}")
+        
+        # Determine the hub's address based on how the dashboard is being accessed (Host header)
+        host = request.headers.get("host", "")
+        # Remove port if present for hostname check
+        hostname = host.split(":")[0] if ":" in host else host
+        
+        # Check if it's a local/private address
+        is_local = hostname in ("localhost", "127.0.0.1", "::1") or \
+                   hostname.startswith("192.168.") or \
+                   hostname.startswith("10.") or \
+                   hostname.endswith(".local")
+        
+        # More precise check for 172.16.x.x - 172.31.x.x
+        if not is_local and hostname.startswith("172."):
+            parts = hostname.split(".")
+            if len(parts) >= 2 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
+                is_local = True
+
+        logger.info(f"QR Request - FRONTEND_URL: {frontend_base}, Host: {host}, is_local: {is_local}")
         
         if url:
             target = url
-        elif frontend_base:
-            # If we have a Frontend URL, we point the QR to it and pass our tunnel as a param
-            remote = getattr(app.state, "cloudflare_url", None) or getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
-            if remote:
-                target = f"{frontend_base.rstrip('/')}/?hub={remote}"
-            else:
-                # Fallback to LAN if no tunnel is ready yet
-                target = f"{frontend_base.rstrip('/')}/?hub={detect_lan_ip()}"
+        elif not is_local and frontend_base:
+            # HUB is cloud/domain deployed (e.g. Cloudflare, ngrok, custom domain)
+            # Use Vercel frontend and pass the current host as the hub param
+            target = f"{frontend_base.rstrip('/')}/?hub={host}"
         else:
-            # Traditional fallback
+            # HUB is running on localhost or LAN -> show direct IP link
             proto = "https" if CERT_PEM.exists() else "http"
-            target = f"{proto}://{detect_lan_ip()}:{port}"
+            lan_ip = detect_lan_ip()
+            target = f"{proto}://{lan_ip}:{port}"
             
         if pin:
             target += ("&" if "?" in target else "?") + f"pin={pin}"
