@@ -210,9 +210,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 if cf_token:
                     print(f"  * Starting Persistent Tunnel with Token...")
                     tunnel_args = [cmd, "tunnel", "--no-autoupdate", "run", "--token", cf_token]
-                    # In token mode, the URL is fixed in the CF Dashboard (e.g. hub.yourdomain.com)
-                    # so we don't need to parse the log for a new URL.
-                    app.state.cloudflare_url = os.getenv("HUB_URL") # User should set this in .env
+                    # Prioritize HUB_URL from .env if it exists
+                    app.state.cloudflare_url = os.getenv("HUB_URL")
                 else:
                     # Quick Tunnel (trycloudflare.com)
                     local_proto = "https" if CERT_PEM.exists() else "http"
@@ -228,13 +227,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 )
                 app.state.cf_proc = proc
                 
-                if not cf_token:
-                    for line in iter(proc.stdout.readline, ""):
-                        match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
-                        if match:
-                            app.state.cloudflare_url = match.group(0)
-                            logger.info("Cloudflare Tunnel active: %s", app.state.cloudflare_url)
-                            break
+                # Monitor logs for the random .trycloudflare.com URL
+                for line in iter(proc.stdout.readline, ""):
+                    # Look for the URL regardless of whether we have a token (for verification)
+                    match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+                    if match:
+                        detected_url = match.group(0)
+                        if not app.state.cloudflare_url:
+                            app.state.cloudflare_url = detected_url
+                        logger.info("Cloudflare Tunnel active: %s", detected_url)
+                        # Don't break; keep logging in the background
             except Exception as e:
                 print(f"  ! Cloudflare Error: {e}")
                 logger.error("Cloudflare Tunnel failed: %s", e)
