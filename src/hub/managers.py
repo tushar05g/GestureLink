@@ -40,19 +40,20 @@ def detect_lan_ip(all_ips: bool = False) -> str | list[str]:
     if not found_ips:
         return ["127.0.0.1"] if all_ips else "127.0.0.1"
 
-    # Filter to only LAN-likely ranges
-    lan_ips = [ip for ip in found_ips if ip.startswith("192.168.") or ip.startswith("10.") or ip.startswith("172.")]
+    # Filter to only LAN-likely ranges, deprioritize virtual/Docker (often 172.17.x.x)
+    lan_ips = [ip for ip in found_ips if ip.startswith("192.168.") or ip.startswith("10.")]
     
+    # If no 192/10 found, look for 172 (but avoid 172.17 which is usually Docker)
+    if not lan_ips:
+        lan_ips = [ip for ip in found_ips if ip.startswith("172.") and not ip.startswith("172.17.")]
+
     if all_ips:
         return sorted(list(lan_ips if lan_ips else found_ips))
     
     # Return the "best" one
     if lan_ips:
-        # Prefer the one from the default interface if it's in the LAN range
-        if next(iter(found_ips)) in lan_ips:
-            return next(iter(found_ips))
         return lan_ips[0]
-    return next(iter(found_ips))
+    return next(iter(found_ips)) if found_ips else "127.0.0.1"
 
 class SecurityManager:
     def __init__(self, security_file: Path):

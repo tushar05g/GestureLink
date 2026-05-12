@@ -401,6 +401,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def get_connected_clients() -> JSONResponse:
         return JSONResponse({"clients": list(connected_clients.values())})
 
+    @app.post("/api/hub/camera/flip")
+    async def flip_hub_camera():
+        if hasattr(app.state, "vision"):
+            app.state.vision.mirror = not getattr(app.state.vision, "mirror", False)
+            return JSONResponse({"ok": True, "mirror": app.state.vision.mirror})
+        return JSONResponse({"ok": False}, status_code=404)
+
     @app.post("/api/hub/name")
     async def set_hub_name(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         name = payload.get("name", "")
@@ -417,16 +424,30 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             return JSONResponse({"ok": True})
         return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
 
-    @app.get("/api/hub/info")
-    async def hub_info() -> JSONResponse:
-        return JSONResponse({
-            "pin": tokens.current_pin,
-            "lan_ip": detect_lan_ip(),
-            "port": port,
-            "hostname": getattr(app.state, "friendly_name", platform.node()),
-            "ngrok_url": app.state.ngrok_url or os.getenv("NGROK_URL"),
-            "network_profile": await _get_network_profile()
-        })
+    @app.get("/api/hub/stats")
+    async def get_hub_stats():
+        import shutil
+        # Disk usage of C: drive (or root)
+        path = "C:\\" if platform.system() == "Windows" else "/"
+        try:
+            usage = shutil.disk_usage(path)
+            # Simple CPU fallback using wmic (Windows)
+            cpu = 0
+            if platform.system() == "Windows":
+                try:
+                    cmd = "wmic cpu get loadpercentage"
+                    res = subprocess.check_output(cmd, shell=True, text=True)
+                    cpu = int(res.splitlines()[1].strip())
+                except: cpu = 5 # Placeholder if wmic fails
+            
+            return JSONResponse({
+                "cpu": cpu,
+                "storage_total": usage.total,
+                "storage_free": usage.free,
+                "storage_percent": round((usage.used / usage.total) * 100, 1)
+            })
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     async def _get_network_profile() -> str:
         if platform.system() != "Windows": return "Unknown"
@@ -739,7 +760,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "lan_ip": detect_lan_ip(),
             "port": port,
             "ngrok_url": getattr(app.state, "ngrok_url", None),
-            "cloudflare_url": getattr(app.state, "cloudflare_url", None)
+            "cloudflare_url": getattr(app.state, "cloudflare_url", None),
+            "pin": tokens.current_pin,
+            "ssl_active": CERT_PEM.exists()
         })
 
     @app.get("/api/apps")

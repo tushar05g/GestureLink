@@ -2,26 +2,45 @@ import multiprocessing
 import sys
 import os
 
+_hub_mutex = None
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-
-# --- Single-Instance Mutex (Windows) ---
-# This named mutex lets the Inno Setup installer detect that the Hub is running
-# and close it gracefully before overwriting files during an update.
-_hub_mutex = None
-if sys.platform == "win32":
-    try:
-        import ctypes
-        _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkHub")
-        if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk(); root.withdraw()
-            messagebox.showerror("GestureLink Hub", "GestureLink Hub is already running.\nCheck the system tray.")
-            root.destroy()
-            sys.exit(1)
-    except Exception:
-        pass  # Non-critical — silently skip on non-Windows or import failure
+    
+    if sys.platform == "win32":
+        try:
+            import ctypes, subprocess, time
+            my_pid = os.getpid()
+            
+            # 1. Proactively clear old instances (including stuck tunnels)
+            # We do this every time to ensure a clean start
+            subprocess.run(["taskkill", "/F", "/IM", "cloudflared.exe", "/T"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "GestureLink_Hub.exe", "/T"], capture_output=True)
+            
+            # Kill other python instances running the hub
+            for pattern in ["src.hub.tray", "src/hub/tray.py", "src\\hub\\tray.py"]:
+                wmic_cmd = f'wmic process where "name=\'python.exe\' and CommandLine like \'%{pattern}%\' and ProcessId != {my_pid}" get ProcessId'
+                res = subprocess.run(wmic_cmd, shell=True, capture_output=True, text=True)
+                for line in res.stdout.splitlines():
+                    pid = line.strip()
+                    if pid.isdigit() and int(pid) != my_pid:
+                        print(f"Clearing old Hub session (PID {pid})...")
+                        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+            
+            # 2. Acquire Mutex with retries
+            success = False
+            for attempt in range(5):
+                _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkHub")
+                if ctypes.windll.kernel32.GetLastError() != 183:
+                    success = True
+                    break
+                time.sleep(1.0)
+                
+            if not success:
+                print("!!! Warning: Another instance is still holding the lock. Please check Task Manager.")
+                sys.exit(1)
+        except Exception:
+            pass  # Non-critical — silently skip on non-Windows or import failure
 
 # Fix for PyInstaller with console=False
 if sys.stdout is None:
@@ -57,9 +76,14 @@ def _start_shutdown_listener(on_shutdown):
     kernel32 = ctypes.windll.kernel32
     WM_QUERYENDSESSION = 0x0011
     WM_ENDSESSION      = 0x0016
+    
+    # Define argument and return types correctly for 64-bit Windows
+    # LPARAM and WPARAM are pointer-sized (64-bit on x64)
+    user32.DefWindowProcW.argtypes = [ctypes.wintypes.HWND, ctypes.c_uint, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.wintypes.LPARAM # LRESULT is pointer-sized
 
     WNDPROCTYPE = ctypes.WINFUNCTYPE(
-        ctypes.c_long,
+        ctypes.wintypes.LPARAM,
         ctypes.wintypes.HWND, ctypes.c_uint,
         ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
     )
