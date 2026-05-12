@@ -45,7 +45,7 @@ def detect_lan_ip(all_ips: bool = False) -> str | list[str]:
     
     # If no 192/10 found, look for 172 (but avoid 172.17 which is usually Docker)
     if not lan_ips:
-        lan_ips = [ip for ip in found_ips if ip.startswith("172.") and not ip.startswith("172.17.")]
+        lan_ips = [ip for ip in found_ips if ip.startswith("172.")]
 
     if all_ips:
         return sorted(list(lan_ips if lan_ips else found_ips))

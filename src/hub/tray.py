@@ -9,38 +9,46 @@ if __name__ == "__main__":
     
     if sys.platform == "win32":
         try:
-            import ctypes, subprocess, time
+            import ctypes, subprocess, time, os
             my_pid = os.getpid()
             
-            # 1. Proactively clear old instances (including stuck tunnels)
-            # We do this every time to ensure a clean start
-            subprocess.run(["taskkill", "/F", "/IM", "cloudflared.exe", "/T"], capture_output=True)
-            subprocess.run(["taskkill", "/F", "/IM", "GestureLink_Hub.exe", "/T"], capture_output=True)
-            
-            # Kill other python instances running the hub
-            for pattern in ["src.hub.tray", "src/hub/tray.py", "src\\hub\\tray.py"]:
-                wmic_cmd = f'wmic process where "name=\'python.exe\' and CommandLine like \'%{pattern}%\' and ProcessId != {my_pid}" get ProcessId'
-                res = subprocess.run(wmic_cmd, shell=True, capture_output=True, text=True)
-                for line in res.stdout.splitlines():
-                    pid = line.strip()
-                    if pid.isdigit() and int(pid) != my_pid:
-                        print(f"Clearing old Hub session (PID {pid})...")
-                        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
-            
-            # 2. Acquire Mutex with retries
-            success = False
-            for attempt in range(5):
+            def get_lock():
+                global _hub_mutex
                 _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkHub")
-                if ctypes.windll.kernel32.GetLastError() != 183:
-                    success = True
-                    break
-                time.sleep(1.0)
+                return ctypes.windll.kernel32.GetLastError()
+
+            err = get_lock()
+            if err == 183:
+                print("DEBUG: Mutex collision detected. Cleaning up old session...")
                 
-            if not success:
+                # 1. Kill external processes
+                subprocess.run(["taskkill", "/F", "/IM", "cloudflared.exe", "/T"], capture_output=True)
+                subprocess.run(["taskkill", "/F", "/IM", "GestureLink_Hub.exe", "/T"], capture_output=True)
+                
+                # 2. Kill other python Hubs
+                patterns = ["src.hub.tray", "src/hub/tray.py", "src\\hub\\tray.py"]
+                for pattern in patterns:
+                    cmd = f'wmic process where "name=\'python.exe\' and CommandLine like \'%{pattern}%\' and ProcessId != {my_pid}" get ProcessId'
+                    res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    for line in res.stdout.splitlines():
+                        pid = line.strip()
+                        if pid.isdigit() and int(pid) != my_pid:
+                            print(f"DEBUG: Terminating zombie Hub (PID {pid})...")
+                            try: os.kill(int(pid), 9)
+                            except: pass
+                
+                # 3. Retry acquisition
+                time.sleep(2.0)
+                err = get_lock()
+                
+            if err == 183:
                 print("!!! Warning: Another instance is still holding the lock. Please check Task Manager.")
                 sys.exit(1)
+            else:
+                if _hub_mutex: print("DEBUG: Hub lock acquired.")
         except Exception:
-            pass  # Non-critical — silently skip on non-Windows or import failure
+            import traceback
+            traceback.print_exc()
 
 # Fix for PyInstaller with console=False
 if sys.stdout is None:
@@ -170,7 +178,9 @@ class GestureLinkTray:
         return final
 
     def on_open_hub(self):
-        webbrowser.open(f"http://localhost:{self.port}/hub")
+        from src.core.utils import resource_path
+        proto = "https" if resource_path("cert.pem").exists() else "http"
+        webbrowser.open(f"{proto}://localhost:{self.port}/hub")
 
     def on_copy_ip(self):
         from src.hub.managers import detect_lan_ip
@@ -189,17 +199,21 @@ class GestureLinkTray:
 
     def run_server(self):
         from src.core.utils import resource_path
-        cert = str(resource_path("cert.pem"))
-        key = str(resource_path("key.pem"))
+        ssl_params = {}
+        cert_path = resource_path("cert.pem")
+        key_path  = resource_path("key.pem")
+        if cert_path.exists() and key_path.exists():
+            ssl_params = {
+                "ssl_certfile": str(cert_path),
+                "ssl_keyfile":  str(key_path)
+            }
         
-        # Launch with SSL to ensure camera access and matching HTTPS dashboard
         uvicorn.run(
             self.app, 
             host=self.host, 
             port=self.port, 
             log_level="info",
-            ssl_keyfile=key,
-            ssl_certfile=cert
+            **ssl_params
         )
 
     def run(self):

@@ -230,11 +230,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     app.state.cloudflare_url = os.getenv("HUB_URL")
                 else:
                     # Quick Tunnel (trycloudflare.com)
-                    local_proto = "https" if CERT_PEM.exists() else "http"
-                    print(f"  * Attempting Quick Tunnel with: {cmd}")
-                    tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://localhost:{port}"]
+                    local_proto = "https" if (CERT_PEM.exists() and KEY_PEM.exists()) else "http"
+                    print(f"  * Attempting Quick Tunnel: {local_proto}://127.0.0.1:{port}")
+                    tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://127.0.0.1:{port}"]
                     if local_proto == "https":
-                        tunnel_args.append("--no-tls-verify")
+                        tunnel_args.extend(["--no-tls-verify", "--origin-server-name", "localhost"])
+                    
+                    print(f"  * Command: {' '.join(tunnel_args)}")
 
                 proc = subprocess.Popen(
                     tunnel_args,
@@ -755,15 +757,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     @app.get("/api/hub/info")
     async def get_hub_info():
-        return JSONResponse({
-            "friendly_name": getattr(app.state, "friendly_name", "GestureLink Hub"),
-            "lan_ip": detect_lan_ip(),
-            "port": port,
-            "ngrok_url": getattr(app.state, "ngrok_url", None),
+        return {
+            "hostname": app.state.friendly_name,
+            "local_ip": detect_lan_ip(),
             "cloudflare_url": getattr(app.state, "cloudflare_url", None),
-            "pin": tokens.current_pin,
-            "ssl_active": CERT_PEM.exists()
-        })
+            "ssl_active": CERT_PEM.exists() and KEY_PEM.exists(),
+            "pin": tokens.current_pin
+        }
 
     @app.get("/api/apps")
     async def get_apps(ip: Optional[str] = None) -> JSONResponse:
