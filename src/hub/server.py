@@ -69,6 +69,20 @@ class EndpointFilter(logging.Filter):
 hub_video_frame: bytes | None = None
 hub_camera_active: bool = False
 
+# Dynamic log buffer for Hub Dashboard
+from collections import deque
+hub_logs = deque(maxlen=50)
+
+class DashboardLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            hub_logs.append(msg)
+        except Exception: pass
+
+logger = logging.getLogger("gesture_control.remote")
+logger.addHandler(DashboardLogHandler())
+
 APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
 
@@ -94,6 +108,8 @@ def _save_settings(sensitivity: int, scroll_speed: int, trackpad_sensitivity: fl
 def _load_settings() -> None:
     if SETTINGS_FILE.exists():
         try:
+            # Issue: CONFIG is used here but imported inside build_app
+            from src.core.config import CONFIG
             with open(SETTINGS_FILE, "r") as f:
                 data = json.load(f)
                 sens = data.get("sensitivity", 50)
@@ -605,6 +621,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 app.state.camera_active = False
                 logger.info("Hub local camera turned OFF")
             return JSONResponse({"ok": True, "active": app.state.camera_active})
+        
+        # Otherwise proxy to agent
+        try:
+            import httpx
+            async with httpx.AsyncClient(verify=False) as client:
+                resp = await client.post(f"https://{target}:8001/api/camera/toggle", json=payload, timeout=2.0)
+                return JSONResponse(resp.json())
+        except Exception as e:
+            logger.error("Proxy camera toggle failed for %s: %s", target, e)
+            return JSONResponse({"ok": False, "error": str(e)})
     
     # --- WebRTC Low Latency Hub ---
     pcs = set()
@@ -677,16 +703,6 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
         })
-        
-        # Otherwise proxy to agent
-        try:
-            import httpx
-            async with httpx.AsyncClient(verify=False) as client:
-                resp = await client.post(f"https://{target}:8001/api/camera/toggle", json=payload, timeout=2.0)
-                return JSONResponse(resp.json())
-        except Exception as e:
-            logger.error("Proxy camera toggle failed for %s: %s", target, e)
-            return JSONResponse({"ok": False, "error": str(e)})
 
     @app.get("/api/hub/camera/stream")
     async def hub_camera_stream():
@@ -774,8 +790,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         pin = payload.get("pin")
         hostname = payload.get("hostname", "Unknown Phone")
         client_ip = request.client.host if request.client else "0.0.0.0"
+        logger.info(f"Pair attempt from {client_ip} ({hostname}) with PIN {pin}")
 
         if pin != tokens.current_pin:
+            logger.warning(f"Invalid PIN from {client_ip}. Expected {tokens.current_pin}, got {pin}")
             return JSONResponse({"status": "error", "error": "Invalid PIN"}, status_code=401)
 
         # Auto-approve trusted IPs — no popup needed for known devices
@@ -831,6 +849,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def reject_pairing(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         req_id = payload.get("id")
         security.reject_request(req_id)
+        return JSONResponse({"ok": True})
+
+    @app.get("/api/hub/logs")
+    async def get_hub_logs() -> JSONResponse:
+        return JSONResponse({"logs": list(hub_logs)})
+
+    @app.post("/api/hub/shutdown")
+    async def shutdown_hub() -> JSONResponse:
+        import os, signal
+        logger.info("Hub shutdown requested via API")
+        # Send SIGTERM to self. tray.py handles this for a clean exit.
+        os.kill(os.getpid(), signal.SIGTERM)
         return JSONResponse({"ok": True})
 
     @app.get("/api/security")
@@ -1130,30 +1160,31 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def qr_gen(request: Request, url: Optional[str] = None, pin: Optional[str] = None) -> StreamingResponse:
         frontend_base = os.getenv("FRONTEND_URL")
         
-        # Determine the hub's address based on how the dashboard is being accessed (Host header)
-        host = request.headers.get("host", "")
+        # Use X-Forwarded-Host if behind a tunnel (Cloudflare, ngrok)
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
         # Remove port if present for hostname check
         hostname = host.split(":")[0] if ":" in host else host
         
-        # Check if it's a local/private address
-        is_local = hostname in ("localhost", "127.0.0.1", "::1") or \
-                   hostname.startswith("192.168.") or \
-                   hostname.startswith("10.") or \
-                   hostname.endswith(".local")
+        # Detect cloud presence (headers or non-local hostname)
+        is_cloud_header = any(h in request.headers for h in ["cf-ray", "cf-connecting-ip", "x-ngrok-file-config"])
         
-        # More precise check for 172.16.x.x - 172.31.x.x
-        if not is_local and hostname.startswith("172."):
-            parts = hostname.split(".")
-            if len(parts) >= 2 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
-                is_local = True
+        def is_private_ip(ip):
+            if ip in ("localhost", "127.0.0.1", "::1"): return True
+            if ip.startswith("192.168.") or ip.startswith("10."): return True
+            if ip.startswith("172."):
+                parts = ip.split(".")
+                if len(parts) >= 2 and parts[1].isdigit():
+                    sec = int(parts[1])
+                    return 16 <= sec <= 31
+            return False
 
-        logger.info(f"QR Request - FRONTEND_URL: {frontend_base}, Host: {host}, is_local: {is_local}")
+        is_local = not is_cloud_header and (is_private_ip(hostname) or hostname.endswith(".local"))
+        logger.info(f"QR Request - Host: {host}, is_local: {is_local}, is_cloud: {is_cloud_header}")
         
         if url:
             target = url
         elif not is_local and frontend_base:
             # HUB is cloud/domain deployed (e.g. Cloudflare, ngrok, custom domain)
-            # Use Vercel frontend and pass the current host as the hub param
             target = f"{frontend_base.rstrip('/')}/?hub={host}"
         else:
             # HUB is running on localhost or LAN -> show direct IP link

@@ -570,7 +570,7 @@
             <div class="header-row">
                 <h2>System Logs</h2>
             </div>
-            <div class="card"
+            <div id="hub-log-container" class="card"
                 style="font-family: monospace; font-size: 0.8rem; background: #000; color: #0f0; max-height: 400px; overflow-y: auto;">
                 <div style="padding: 10px;">[INFO] Hub initialized successfully.</div>
                 <div style="padding: 10px;">[INFO] Security Manager active.</div>
@@ -590,6 +590,12 @@
                     <span>Auto-Rotate PIN</span>
                     <span style="color: var(--accent);">Enabled (30m)</span>
                 </div>
+            </div>
+            
+            <div class="card" style="margin-top: 20px; border-top: 1px solid var(--danger);">
+                <h3 style="color: var(--danger);">Danger Zone</h3>
+                <p style="font-size: 0.9rem; opacity: 0.7; margin-bottom: 15px;">Terminating the Hub will stop all gesture control features until manually restarted on the PC.</p>
+                <button onclick="shutdownHub()" style="background: var(--danger); width: 100%;">Shutdown Hub</button>
             </div>
         </section>
     </main>
@@ -702,6 +708,17 @@
                 const agentRes = await fetch('/api/discovered');
                 const agentData = await agentRes.json();
                 renderAgents(agentData.devices);
+                // Update Logs
+                const logRes = await fetch('/api/hub/logs');
+                const logData = await logRes.json();
+                const logContainer = document.getElementById('hub-log-container');
+                if (logData.logs && logData.logs.length > 0) {
+                    logContainer.innerHTML = logData.logs.map(l => `<div style="padding: 5px 10px; border-bottom: 1px solid #111;">${l}</div>`).join('');
+                    // Auto-scroll to bottom if near bottom
+                    if (logContainer.scrollTop + logContainer.clientHeight > logContainer.scrollHeight - 50) {
+                        logContainer.scrollTop = logContainer.scrollHeight;
+                    }
+                }
             } catch (err) {
                 console.error("Update failed:", err);
             }
@@ -953,6 +970,15 @@
                 });
                 if (res.ok) alert("Hub renamed successfully!");
             } catch (e) { console.error(e); }
+        }
+
+        async function shutdownHub() {
+            if (!confirm("Are you sure you want to shut down the Hub? You will need to manually restart the application on your PC to use it again.")) return;
+            try {
+                await fetch('/api/hub/shutdown', { method: 'POST' });
+                alert("Hub is shutting down. You can now close this tab.");
+                window.close();
+            } catch (e) { alert("Shutdown command sent."); }
         }
 
         // Initialize name field
