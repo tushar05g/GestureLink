@@ -123,7 +123,9 @@ async function init() {
     }
     try {
       const active = e.target.checked;
-      const res = await fetch(hubApi(`/api/hub/camera/toggle?target=${activePC.ip}`), {
+      // Don't pass target when connected via tunnel - Hub will control itself
+      const targetParam = HUB_BASE_URL.includes("trycloudflare.com") ? "" : `?target=${activePC.ip}`;
+      const res = await fetch(hubApi(`/api/hub/camera/toggle${targetParam}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active })
@@ -140,7 +142,9 @@ async function init() {
       }
 
       if (remoteGestureStatus) remoteGestureStatus.textContent = active ? "CAMERA ON" : "CAMERA OFF";
+      console.log("[DEBUG] Camera toggle successful:", { active, target: targetParam });
     } catch (err) {
+      console.error("[DEBUG] Camera toggle error:", err);
       alert(`Failed to toggle camera: ${err}`);
       pcCameraToggle.checked = !e.target.checked;
     }
