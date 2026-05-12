@@ -202,24 +202,20 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             
         # --- WebRTC SIGNALING LISTENER (For Remote/Tunnel) ---
         async def _signaling_listener():
-            # Wait a moment for the 'signals' dict to be ready in the outer scope
-            await asyncio.sleep(1)
-            logger.info("WebRTC Signaling Listener started for 'hub_pc'")
+            await asyncio.sleep(2) # Wait for tunnel to stabilize
+            # Use 'hub_pc' as the primary mailbox to match mobile UI expectation
+            target_id = "hub_pc"
+            logger.info(f"WebRTC Signaling Listener active. Polling mailbox: '{target_id}'")
             while True:
                 try:
-                    # Check the queue for signals targeting 'hub_pc'
-                    if "hub_pc" in signals:
-                        payload = await signals["hub_pc"]["q"].get()
+                    if target_id in signals:
+                        payload = await signals[target_id]["q"].get()
                         if payload.get("type") == "offer":
-                            logger.info("Received remote WebRTC offer via signaling queue")
-                            # Process the offer
+                            logger.info(">>> Received Remote Offer via 'hub_pc'!")
                             offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
+                            
                             pc = RTCPeerConnection(configuration={
-                                "iceServers": [
-                                    {"urls": ["stun:stun.l.google.com:19302"]},
-                                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                                    {"urls": ["stun:stun2.l.google.com:19302"]}
-                                ]
+                                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
                             })
                             setup_pc(pc)
                             
@@ -227,14 +223,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             answer = await pc.createAnswer()
                             await pc.setLocalDescription(answer)
                             
-                            # Push the ANSWER back to the queue so the phone can see it
+                            # Send answer back to wherever the phone is listening
+                            # Typically mobile apps listen on their own unique session ID or 'mobile_client'
                             await webrtc_signal("mobile_client", {
                                 "sdp": pc.localDescription.sdp,
                                 "type": pc.localDescription.type
                             })
-                            logger.info("Sent remote WebRTC answer back to 'mobile_client'")
+                            logger.info("<<< Sent Remote Answer to 'mobile_client'. Handshake complete.")
                     
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.2)
                 except Exception as e:
                     logger.error(f"Signaling listener error: {e}")
                     await asyncio.sleep(2)
