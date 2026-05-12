@@ -684,7 +684,17 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             from urllib.parse import urlparse
             ngrok_host = urlparse(app.state.ngrok_url).hostname
 
-        is_hub = not target or target in ("localhost", "127.0.0.1", lan_ip) or (ngrok_host and target == ngrok_host)
+        cloudflare_host = ""
+        if hasattr(app.state, "cloudflare_url") and app.state.cloudflare_url:
+            from urllib.parse import urlparse
+            cloudflare_host = urlparse(app.state.cloudflare_url).hostname
+
+        is_hub = (
+            not target
+            or target in ("localhost", "127.0.0.1", lan_ip)
+            or (ngrok_host and target == ngrok_host)
+            or (cloudflare_host and target == cloudflare_host)
+        )
         
         if is_hub:
             if active and not app.state.camera_active:
@@ -1060,7 +1070,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             from urllib.parse import urlparse
             ngrok_host = urlparse(app.state.ngrok_url).hostname
 
-        is_local = (target is None or target == local_ip or target == "localhost" or (ngrok_host and target == ngrok_host))
+        cloudflare_host = ""
+        if hasattr(app.state, "cloudflare_url") and app.state.cloudflare_url:
+            from urllib.parse import urlparse
+            cloudflare_host = urlparse(app.state.cloudflare_url).hostname
+
+        is_local = (
+            target is None
+            or target == local_ip
+            or target == "localhost"
+            or (ngrok_host and target == ngrok_host)
+            or (cloudflare_host and target == cloudflare_host)
+        )
 
         if not is_local:
             logger.info("RELAY PATH: proxying %s -> Agent %s", client_ip, target)

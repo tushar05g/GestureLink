@@ -23,6 +23,17 @@ function getHubBaseUrl(): string {
 const HUB_BASE_URL = getHubBaseUrl();
 const HUB_HOSTNAME = new URL(HUB_BASE_URL).hostname;
 
+function isHubSelfTarget(target?: string | null, hostname?: string | null): boolean {
+  if (hostname && /^hub\b/i.test(String(hostname).trim())) return true;
+  if (!target) return true;
+  const normalized = String(target).trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized === HUB_HOSTNAME.toLowerCase() || normalized === "localhost" || normalized === "127.0.0.1") return true;
+  // Tunnel hostnames rotate. Treat any tunnel hostname as self when this app is already connected via a tunnel Hub URL.
+  if (normalized.includes("trycloudflare.com") && HUB_HOSTNAME.toLowerCase().includes("trycloudflare.com")) return true;
+  return false;
+}
+
 function hubApi(path: string): string {
   return `${HUB_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
@@ -124,7 +135,9 @@ async function init() {
     try {
       const active = e.target.checked;
       // Don't pass target when connected via tunnel - Hub will control itself
-      const targetParam = HUB_BASE_URL.includes("trycloudflare.com") ? "" : `?target=${activePC.ip}`;
+      const targetParam = isHubSelfTarget(activePC?.ip, activePC?.hostname)
+        ? ""
+        : `?target=${encodeURIComponent(activePC.ip)}`;
       const res = await fetch(hubApi(`/api/hub/camera/toggle${targetParam}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -344,11 +357,13 @@ globalThis.connectToPC = async (i: number) => {
   }
 
   const proto = HUB_BASE_URL.startsWith("https:") ? "wss:" : "ws:";
-  const wsUrl = `${proto}//${new URL(HUB_BASE_URL).host}/ws?token=${authToken}&target=${d.ip}`;
+  const targetParam = isHubSelfTarget(d.ip, d.hostname) ? "" : `&target=${encodeURIComponent(d.ip)}`;
+  const wsUrl = `${proto}//${new URL(HUB_BASE_URL).host}/ws?token=${authToken}${targetParam}`;
 
   console.log(`[DEBUG] Connecting to device #${i}:`, {
     hostname: d.hostname,
     ip: d.ip,
+    selfTarget: isHubSelfTarget(d.ip, d.hostname),
     wsUrl: wsUrl,
     protocol: proto,
     authToken: authToken?.substring(0, 8) + "..."
@@ -496,9 +511,10 @@ async function activatePC(d: any) {
   syncSettings();
 
   try {
+    const camStatusTarget = isHubSelfTarget(d.ip, d.hostname) ? "" : `?target=${encodeURIComponent(d.ip)}`;
     const [modeRes, camRes] = await Promise.all([
       fetch(hubApi("/api/hub/mode")).then(r => r.json()),
-      fetch(hubApi(`/api/hub/camera/status?target=${d.ip}`)).then(r => r.json()).catch(() => ({ active: false }))
+      fetch(hubApi(`/api/hub/camera/status${camStatusTarget}`)).then(r => r.json()).catch(() => ({ active: false }))
     ]);
 
     const modeBtns = document.querySelectorAll(".mode-btn");
