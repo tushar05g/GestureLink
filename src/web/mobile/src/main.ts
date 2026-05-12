@@ -7,6 +7,26 @@ let devices: any[] = [];
 let authToken = localStorage.getItem("gesturelink_token");
 let hapticsEnabled = localStorage.getItem("gesturelink_haptics") !== "false";
 
+function getHubBaseUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  const hubParam = params.get("hub") || localStorage.getItem("gesturelink_hub_url");
+  if (hubParam) {
+    const normalized = hubParam.startsWith("http://") || hubParam.startsWith("https://")
+      ? hubParam
+      : `https://${hubParam}`;
+    localStorage.setItem("gesturelink_hub_url", normalized);
+    return normalized.replace(/\/$/, "");
+  }
+  return window.location.origin.replace(/\/$/, "");
+}
+
+const HUB_BASE_URL = getHubBaseUrl();
+const HUB_HOSTNAME = new URL(HUB_BASE_URL).hostname;
+
+function hubApi(path: string): string {
+  return `${HUB_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 // WebRTC State
 let peerConn: RTCPeerConnection | null = null;
 let dataChannel: RTCDataChannel | null = null;
@@ -59,7 +79,7 @@ async function init() {
   // Validate stored token against server — catches stale tokens after server restart
   if (authToken && authToken !== "undefined") {
     try {
-      const vRes = await fetch(`${location.origin}/api/validate-token`, {
+      const vRes = await fetch(hubApi("/api/validate-token"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: authToken })
@@ -103,7 +123,7 @@ async function init() {
     }
     try {
       const active = e.target.checked;
-      const res = await fetch(`${location.origin}/api/hub/camera/toggle?target=${activePC.ip}`, {
+      const res = await fetch(hubApi(`/api/hub/camera/toggle?target=${activePC.ip}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active })
@@ -154,7 +174,7 @@ async function init() {
     const offer = await peerConn.createOffer();
     await peerConn.setLocalDescription(offer);
 
-    const res = await fetch(`${location.origin}/api/webrtc/offer`, {
+    const res = await fetch(hubApi("/api/webrtc/offer"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sdp: peerConn.localDescription?.sdp, type: peerConn.localDescription?.type })
@@ -177,7 +197,7 @@ async function init() {
     btn.addEventListener('click', async () => {
       const mode = parseInt((btn as HTMLElement).dataset.mode || "0");
       try {
-        const res = await fetch(`${location.origin}/api/hub/mode`, {
+        const res = await fetch(hubApi("/api/hub/mode"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode })
@@ -214,7 +234,7 @@ async function init() {
     scanBtn.setAttribute('disabled', 'true');
     scanRipple?.classList.add('active');
     try {
-      const res = await fetch(`${location.origin}/api/discovered`);
+      const res = await fetch(hubApi("/api/discovered"));
       const data = await res.json();
       const discovered: Record<string, string> = data.devices || {};
       let foundNew = false;
@@ -235,7 +255,7 @@ async function init() {
 
   // Load shortcuts from server
   try {
-    const r = await fetch(`${location.origin}/api/shortcuts`);
+    const r = await fetch(hubApi("/api/shortcuts"));
     const d = await r.json();
     renderShortcuts(d.shortcuts || {});
   } catch (_) { /* use defaults */ }
@@ -296,7 +316,7 @@ globalThis.renameDevice = async (i: number) => {
   if (!newName || !newName.trim() || newName.trim() === d.hostname) return;
   const trimmed = newName.trim();
   try {
-    await fetch(`${location.origin}/api/devices/rename`, {
+    await fetch(hubApi("/api/devices/rename"), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip: d.ip, name: trimmed })
@@ -319,8 +339,8 @@ globalThis.connectToPC = async (i: number) => {
     connectBtn.classList.add('connecting');
   }
 
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${proto}//${location.host}/ws?token=${authToken}&target=${d.ip}`;
+  const proto = HUB_BASE_URL.startsWith("https:") ? "wss:" : "ws:";
+  const wsUrl = `${proto}//${new URL(HUB_BASE_URL).host}/ws?token=${authToken}&target=${d.ip}`;
 
   console.log(`[DEBUG] Connecting to device #${i}:`, {
     hostname: d.hostname,
@@ -346,10 +366,10 @@ globalThis.connectToPC = async (i: number) => {
     ws.onerror = (err) => {
       console.error("[DEBUG] WebSocket Connection Error:", err);
       console.error("[DEBUG] Network Details:", {
-        location: location.origin,
+        location: HUB_BASE_URL,
         target_ip: d.ip,
         protocol: proto,
-        hostname: location.hostname,
+        hostname: HUB_HOSTNAME,
         wsUrl: wsUrl
       });
       alert(`⚠️ Could not connect to ${d.hostname}.\n\nEnsure the Hub is running and on the same network.`);
@@ -442,7 +462,7 @@ async function initWebRTC() {
   (async () => {
     while (peerConn) {
       try {
-        const res = await fetch(`/api/webrtc/signal/${myPeerId}`);
+        const res = await fetch(hubApi(`/api/webrtc/signal/${myPeerId}`));
         const data = await res.json();
         if (data.ok && data.signal) {
           if (data.signal.type === "answer") await peerConn.setRemoteDescription(new RTCSessionDescription(data.signal));
@@ -455,7 +475,7 @@ async function initWebRTC() {
 }
 
 async function sendSignal(data: any) {
-  await fetch(`/api/webrtc/signal/hub_pc`, {
+  await fetch(hubApi("/api/webrtc/signal/hub_pc"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ from: myPeerId, ...data })
@@ -473,8 +493,8 @@ async function activatePC(d: any) {
 
   try {
     const [modeRes, camRes] = await Promise.all([
-      fetch(`${location.origin}/api/hub/mode`).then(r => r.json()),
-      fetch(`${location.origin}/api/hub/camera/status?target=${d.ip}`).then(r => r.json()).catch(() => ({ active: false }))
+      fetch(hubApi("/api/hub/mode")).then(r => r.json()),
+      fetch(hubApi(`/api/hub/camera/status?target=${d.ip}`)).then(r => r.json()).catch(() => ({ active: false }))
     ]);
 
     const modeBtns = document.querySelectorAll(".mode-btn");
@@ -495,8 +515,8 @@ async function syncSettings() {
   if (!activePC) return;
   try {
     const [shortcutsRes, setRes] = await Promise.all([
-      fetch(`${location.origin}/api/shortcuts`).then(r => r.json()),
-      fetch(`${location.origin}/api/settings`).then(r => r.json())
+      fetch(hubApi("/api/shortcuts")).then(r => r.json()),
+      fetch(hubApi("/api/settings")).then(r => r.json())
     ]);
     const sens = document.getElementById("sensRange") as HTMLInputElement;
     const scroll = document.getElementById("scrollRange") as HTMLInputElement;
@@ -531,7 +551,7 @@ let activeShortcutSlot = "";
 
   try {
     const targetIp = activePC ? activePC.ip : "";
-    const res = await fetch(`${location.origin}/api/apps?ip=${targetIp}`);
+    const res = await fetch(hubApi(`/api/apps?ip=${targetIp}`));
     const data = await res.json();
     appSelect.innerHTML = '<option value="">— Choose from device —</option>';
     data.apps.forEach((app: any) => {
@@ -550,7 +570,7 @@ saveAppShortcut.onclick = async () => {
   if (!target) { alert("Please select or type an app/command."); return; }
 
   try {
-    const res = await fetch(`${location.origin}/api/shortcuts`, {
+    const res = await fetch(hubApi("/api/shortcuts"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shortcuts: { [activeShortcutSlot]: { target, enabled: true } } })
@@ -579,20 +599,20 @@ async function startApp() {
 
   // Get hub info to find the Local LAN IP
   try {
-    const res = await fetch(`${location.origin}/api/hub/info`);
+    const res = await fetch(hubApi("/api/hub/info"));
     const data = await res.json();
     
     // 1. Add the current domain
-    addDeviceToList(location.hostname, "Hub (Primary)");
+    addDeviceToList(HUB_HOSTNAME, "Hub (Primary)");
     
     // 2. Add the Local LAN IP (if different)
-    if (data.lan_ip && data.lan_ip !== location.hostname) {
+    if (data.lan_ip && data.lan_ip !== HUB_HOSTNAME) {
       addDeviceToList(data.lan_ip, "Hub (Local LAN)");
     }
 
     // AUTO-CONNECT STRATEGY:
     // Try zero-latency direct connection first (LAN), then fall back to tunnel
-    if (data.lan_ip && location.hostname !== data.lan_ip) {
+    if (data.lan_ip && HUB_HOSTNAME !== data.lan_ip) {
        console.log("🔍 Probing Local LAN for zero-latency fallback...");
        try {
          // Use protocol and port from hub info response
@@ -629,7 +649,7 @@ async function startApp() {
 
   } catch (e) {
     console.error("Hybrid start failed:", e);
-    addDeviceToList(location.hostname, "Hub (Primary)");
+    addDeviceToList(HUB_HOSTNAME, "Hub (Primary)");
     // @ts-ignore
     globalThis.connectToPC(0);
   }
@@ -639,7 +659,7 @@ async function logout() {
   const token = localStorage.getItem("gesturelink_token");
   if (token) {
     try {
-      await fetch(`${location.origin}/api/logout`, {
+      await fetch(hubApi("/api/logout"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token })
@@ -838,7 +858,7 @@ async function saveSettings() {
   try {
     const sens = (document.getElementById("sensRange") as HTMLInputElement).value;
     const scroll = (document.getElementById("scrollRange") as HTMLInputElement).value;
-    await fetch(`${location.origin}/api/settings`, {
+    await fetch(hubApi("/api/settings"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -868,7 +888,7 @@ function setupPinInputs() {
 
 async function setupShortcuts() {
   try {
-    const res = await fetch(`${location.origin}/api/shortcuts`);
+    const res = await fetch(hubApi("/api/shortcuts"));
     const data = await res.json();
     renderShortcuts(data.shortcuts || {});
   } catch (_) { /* use defaults */ }
@@ -880,8 +900,8 @@ async function autoPair(pin: string) {
 
   // Determine Hub URL: query param > local
   const urlParams = new URLSearchParams(window.location.search);
-  const hubUrl = urlParams.get('hub') || location.origin;
-  const baseUrl = hubUrl.startsWith('http') ? hubUrl : `${location.protocol}//${hubUrl}`;
+  const hubUrl = urlParams.get('hub') || HUB_BASE_URL;
+  const baseUrl = hubUrl.startsWith('http') ? hubUrl : `https://${hubUrl}`;
 
   try {
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/pair`, {
@@ -920,7 +940,7 @@ function finalizePairing(token: string) {
 async function pollPairingStatus(reqId: string) {
   const interval = setInterval(async () => {
     try {
-      const res = await fetch(`${location.origin}/api/pair/status/${reqId}`);
+      const res = await fetch(hubApi(`/api/pair/status/${reqId}`));
       const data = await res.json();
       if (data.status === "approved") {
         clearInterval(interval);

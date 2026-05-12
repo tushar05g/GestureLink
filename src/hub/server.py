@@ -213,9 +213,19 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         if payload.get("type") == "offer":
                             logger.info(">>> Received Remote Offer via 'hub_pc'!")
                             offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
+                            reply_target = payload.get("from") or "mobile_client"
                             
                             pc = RTCPeerConnection(configuration={
-                                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+                                "iceServers": [
+                                    {"urls": ["stun:stun.l.google.com:19302"]},
+                                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                                    {"urls": ["stun:stun2.l.google.com:19302"]},
+                                    {
+                                        "urls": ["turn:numb.viagenie.ca"],
+                                        "username": "webrtc@example.com",
+                                        "credential": "webrtcpassword"
+                                    }
+                                ]
                             })
                             setup_pc(pc)
                             
@@ -225,11 +235,11 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             
                             # Send answer back to wherever the phone is listening
                             # Typically mobile apps listen on their own unique session ID or 'mobile_client'
-                            await webrtc_signal("mobile_client", {
+                            await webrtc_signal(reply_target, {
                                 "sdp": pc.localDescription.sdp,
                                 "type": pc.localDescription.type
                             })
-                            logger.info("<<< Sent Remote Answer to 'mobile_client'. Handshake complete.")
+                            logger.info("<<< Sent Remote Answer to '%s'. Handshake complete.", reply_target)
                     
                     await asyncio.sleep(0.2)
                 except Exception as e:
