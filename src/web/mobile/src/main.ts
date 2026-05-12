@@ -842,14 +842,18 @@ function sendHotkey(keys: string[]) {
 
 function sendCommand(cmd: any) {
   // 🚀 Use WebRTC DataChannel for ultra-low latency if available
-  if (activePC?.dc && activePC.dc.readyState === 'open') {
-    activePC.dc.send(JSON.stringify(cmd));
+  if (dataChannel && dataChannel.readyState === 'open') {
+    dataChannel.send(JSON.stringify(cmd));
+    console.log("[DEBUG] Sent via DataChannel:", cmd);
     return;
   }
   
   // 🛡️ Fallback to WebSocket if WebRTC is still connecting or not supported
   if (activePC?.ws?.readyState === 1) {
     activePC.ws.send(JSON.stringify(cmd));
+    console.log("[DEBUG] Sent via WebSocket:", cmd);
+  } else {
+    console.warn("[DEBUG] Neither DataChannel nor WebSocket available. activePC:", activePC, "dataChannel:", dataChannel);
   }
 }
 
