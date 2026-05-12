@@ -689,7 +689,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.post("/api/webrtc/offer")
     async def webrtc_offer(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
-        pc = RTCPeerConnection()
+        
+        # Add STUN servers to bypass hotspot/firewall restrictions
+        pc = RTCPeerConnection(configuration={
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {"urls": ["stun:stun1.l.google.com:19302"]},
+                {"urls": ["stun:stun2.l.google.com:19302"]}
+            ]
+        })
         pcs.add(pc)
 
         @pc.on("connectionstatechange")
@@ -759,6 +767,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def get_hub_info():
         return {
             "hostname": app.state.friendly_name,
+            "hub_id": f"GL-HUB-{platform.node()}",
             "local_ip": detect_lan_ip(),
             "cloudflare_url": getattr(app.state, "cloudflare_url", None),
             "ssl_active": CERT_PEM.exists() and KEY_PEM.exists(),
