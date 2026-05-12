@@ -184,21 +184,64 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     # --- LIFESPAN HANDLER (Startup/Shutdown) ---
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Startup
+        # --- Hub State Initialization (MUST BE FIRST) ---
+        app.state.cloudflare_url = None
+        app.state.cf_proc = None
+        app.state.friendly_name = platform.node()
+        
         _load_settings()
         
         # Load Friendly Name from config
-        app.state.friendly_name = platform.node()
         config_path = os.path.join(os.path.dirname(__file__), "hub_config.json")
         if os.path.exists(config_path):
             try:
                 import json
                 with open(config_path, "r") as f:
-                    app.state.friendly_name = json.load(f).get("friendly_name", platform.node())
+                    app.state.friendly_name = json.load(f).get("friendly_name", app.state.friendly_name)
             except: pass
             
+        # --- WebRTC SIGNALING LISTENER (For Remote/Tunnel) ---
+        async def _signaling_listener():
+            # Wait a moment for the 'signals' dict to be ready in the outer scope
+            await asyncio.sleep(1)
+            logger.info("WebRTC Signaling Listener started for 'hub_pc'")
+            while True:
+                try:
+                    # Check the queue for signals targeting 'hub_pc'
+                    if "hub_pc" in signals:
+                        payload = await signals["hub_pc"]["q"].get()
+                        if payload.get("type") == "offer":
+                            logger.info("Received remote WebRTC offer via signaling queue")
+                            # Process the offer
+                            offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
+                            pc = RTCPeerConnection(configuration={
+                                "iceServers": [
+                                    {"urls": ["stun:stun.l.google.com:19302"]},
+                                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                                    {"urls": ["stun:stun2.l.google.com:19302"]}
+                                ]
+                            })
+                            setup_pc(pc)
+                            
+                            await pc.setRemoteDescription(offer)
+                            answer = await pc.createAnswer()
+                            await pc.setLocalDescription(answer)
+                            
+                            # Push the ANSWER back to the queue so the phone can see it
+                            await webrtc_signal("mobile_client", {
+                                "sdp": pc.localDescription.sdp,
+                                "type": pc.localDescription.type
+                            })
+                            logger.info("Sent remote WebRTC answer back to 'mobile_client'")
+                    
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.error(f"Signaling listener error: {e}")
+                    await asyncio.sleep(2)
+        
+        asyncio.create_task(_signaling_listener())
+
         # --- CLOUDFLARE TUNNEL (Preferred) ---
-        app.state.cloudflare_url = None
         def _run_cf():
             try:
                 import re, subprocess, threading, os
@@ -660,6 +703,35 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     # --- WebRTC Low Latency Hub ---
     pcs = set()
 
+    def setup_pc(pc: RTCPeerConnection):
+        pcs.add(pc)
+
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            if pc.connectionState == "failed" or pc.connectionState == "closed":
+                await pc.close()
+                pcs.discard(pc)
+
+        # Handle Data Channel for Gestures
+        @pc.on("datachannel")
+        def on_datachannel(channel):
+            class ChannelResponder:
+                def __init__(self, ch): self.ch = ch
+                async def send_json(self, data):
+                    if self.ch.readyState == "open":
+                        self.ch.send(json.dumps(data))
+            
+            responder = ChannelResponder(channel)
+            @channel.on("message")
+            async def on_message(message):
+                if isinstance(message, str):
+                    try:
+                        await _handle_ws_message(responder, {"text": message}, None, mouse)
+                    except: pass
+
+        # Add Video Track
+        pc.addTrack(HubVideoStreamTrack())
+
     class HubVideoStreamTrack(VideoStreamTrack):
         def __init__(self):
             super().__init__()
@@ -700,33 +772,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 {"urls": ["stun:stun2.l.google.com:19302"]}
             ]
         })
-        pcs.add(pc)
-
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            if pc.connectionState == "failed" or pc.connectionState == "closed":
-                await pc.close()
-                pcs.discard(pc)
-
-        # Handle Data Channel for Gestures
-        @pc.on("datachannel")
-        def on_datachannel(channel):
-            class ChannelResponder:
-                def __init__(self, ch): self.ch = ch
-                async def send_json(self, data):
-                    if self.ch.readyState == "open":
-                        self.ch.send(json.dumps(data))
-            
-            responder = ChannelResponder(channel)
-            @channel.on("message")
-            async def on_message(message):
-                if isinstance(message, str):
-                    try:
-                        await _handle_ws_message(responder, {"text": message}, None, mouse)
-                    except: pass
-
-        # Add Video Track
-        pc.addTrack(HubVideoStreamTrack())
+        setup_pc(pc)
 
         await pc.setRemoteDescription(offer)
         answer = await pc.createAnswer()
