@@ -1072,16 +1072,25 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         if not is_local:
             logger.info("RELAY PATH: proxying %s -> Agent %s", client_ip, target)
-            agent_url = f"wss://{target}:8001/ws?token=hub_internal"
-            # Create a permissive SSL context that accepts self-signed certificates.
-            # ssl=False would disable SSL entirely (wrong — Agent requires WSS).
-            # ssl=True would validate the cert (fails for self-signed).
-            import ssl as _ssl
-            ssl_ctx = _ssl.create_default_context()
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = _ssl.CERT_NONE
+            
+            # Try WSS first, fallback to WS if Agent isn't using SSL
+            async def connect_to_agent():
+                # permissive SSL context for self-signed certs
+                import ssl as _ssl
+                ssl_ctx = _ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = _ssl.CERT_NONE
+                
+                try:
+                    agent_url_wss = f"wss://{target}:8001/ws?token=hub_internal"
+                    return await websockets.connect(agent_url_wss, ssl=ssl_ctx, open_timeout=2)
+                except Exception:
+                    logger.info("Agent WSS failed, falling back to WS for %s", target)
+                    agent_url_ws = f"ws://{target}:8001/ws?token=hub_internal"
+                    return await websockets.connect(agent_url_ws, open_timeout=2)
+
             try:
-                async with websockets.connect(agent_url, ssl=ssl_ctx) as agent_ws:
+                async with await connect_to_agent() as agent_ws:
                     async def mobile_to_agent():
                         try:
                             while True:
@@ -1260,7 +1269,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     @app.get("/lan-qr.png")
     async def qr_gen(request: Request, url: Optional[str] = None, pin: Optional[str] = None) -> StreamingResponse:
-        frontend_base = os.getenv("FRONTEND_URL")
+        frontend_base = os.getenv("FRONTEND_URL") or "https://gesture-link-iota.vercel.app"
         
         # Use X-Forwarded-Host if behind a tunnel (Cloudflare, ngrok)
         host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
@@ -1283,17 +1292,26 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         is_local = not is_cloud_header and (is_private_ip(hostname) or hostname.endswith(".local"))
         logger.info(f"QR Request - Host: {host}, is_local: {is_local}, is_cloud: {is_cloud_header}")
         
+        # Get the active tunnel URL if it exists
+        tunnel_url = getattr(app.state, 'cloudflare_url', None)
+        
         if url:
             target = url
-        elif not is_local and frontend_base:
-            # HUB is cloud/domain deployed (e.g. Cloudflare, ngrok, custom domain)
-            target = f"{frontend_base.rstrip('/')}/?hub={host}"
+        elif (tunnel_url or not is_local) and frontend_base:
+            # HUB is cloud/tunnel deployed or explicitly has a tunnel active
+            hub_address = tunnel_url or host
+            # Ensure we use the hostname only (strip protocols and ports)
+            hub_hostname = hub_address.replace("https://", "").replace("http://", "").split("/")[0]
+            if ":" in hub_hostname: hub_hostname = hub_hostname.split(":")[0]
+            
+            target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
+            logger.info(f"QR pointing to Vercel: {target}")
         else:
-            # HUB is running on localhost or LAN -> show direct IP link
-            # We now use http for local connections to avoid SSL trust issues on hotspots
+            # HUB is running on localhost/LAN with no tunnel -> show direct IP link
             proto = "http"
             lan_ip = detect_lan_ip()
             target = f"{proto}://{lan_ip}:{port}"
+            logger.info(f"QR pointing to LAN: {target}")
             
         if pin:
             target += ("&" if "?" in target else "?") + f"pin={pin}"
