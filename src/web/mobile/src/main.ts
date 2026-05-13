@@ -689,9 +689,9 @@ async function logout() {
   localStorage.removeItem("gesturelink_token");
   localStorage.removeItem("gesturelink_ip");
   
-  // Clear URL parameters to prevent auto-pairing on reload
+  // Clear only the PIN parameter to prevent auto-pairing on reload, but keep the Hub address
   const url = new URL(window.location.href);
-  url.search = "";
+  url.searchParams.delete("pin");
   window.history.replaceState({}, "", url.toString());
   
   location.reload();
