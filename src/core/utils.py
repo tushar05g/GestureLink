@@ -9,11 +9,11 @@ from pathlib import Path
 
 _hub_mutex = None
 
-def get_lock():
-    """Acquires a global named mutex to ensure only one Hub instance runs."""
+def get_lock(name="GestureLinkHub"):
+    """Acquires a global named mutex to ensure only one instance of an app runs."""
     global _hub_mutex
     if sys.platform == "win32":
-        _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkHub")
+        _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, name)
         return ctypes.windll.kernel32.GetLastError()
     return 0
 

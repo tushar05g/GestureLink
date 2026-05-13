@@ -3,22 +3,7 @@ import os
 import multiprocessing
 
 # --- Single-Instance Mutex (Windows) ---
-# This named mutex lets the Inno Setup installer detect that the Agent is running
-# and close it gracefully before overwriting files during an update.
-_agent_mutex = None
-if sys.platform == "win32":
-    try:
-        import ctypes
-        _agent_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkAgent")
-        if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk(); root.withdraw()
-            messagebox.showerror("GestureLink Agent", "GestureLink Agent is already running.\nCheck the system tray.")
-            root.destroy()
-            sys.exit(1)
-    except Exception:
-        pass  # Non-critical — silently skip on non-Windows or import failure
+# Logic moved inside __main__ to prevent child processes from killing the parent.
 
 # CRITICAL: Fix for PyInstaller + Multiprocessing (prevent infinite loop / fork bomb)
 if __name__ == "__main__":
@@ -173,6 +158,19 @@ class AgentTray:
         self.icon.run()
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    
+    if sys.platform == "win32":
+        try:
+            from src.core.utils import kill_process_on_port, kill_processes_by_name, get_lock
+            # Cleanup and single-instance check
+            kill_process_on_port(8001)
+            kill_processes_by_name(["GestureLink_Agent"])
+            if get_lock("GestureLinkAgent") == 183:
+                print("Agent already running. Exiting.")
+                sys.exit(1)
+        except Exception: pass
+    
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8001)
