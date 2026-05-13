@@ -74,7 +74,9 @@ hidden_imports = [
     "src.core.vision_worker",
     "src.core.utils",
     "src.core.modal_vision",
-    "psutil"
+    "psutil",
+    "zeroconf._utils.ipaddress",
+    "zeroconf._handlers.answers"
 ]
 
 datas = [

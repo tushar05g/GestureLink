@@ -112,7 +112,9 @@ hidden_imports = [
     "av",
     "pyee",
     "cryptography",
-    "psutil"
+    "psutil",
+    "zeroconf._utils.ipaddress",
+    "zeroconf._handlers.answers"
 ]
 
 # ─── Data files to bundle ─────────────────────────────────────────────────────
