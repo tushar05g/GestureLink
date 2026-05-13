@@ -68,20 +68,9 @@ class EndpointFilter(logging.Filter):
 # Global state for camera streaming
 hub_video_frame: bytes | None = None
 hub_camera_active: bool = False
-
-# Dynamic log buffer for Hub Dashboard
-from collections import deque
-hub_logs = deque(maxlen=50)
-
-class DashboardLogHandler(logging.Handler):
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            hub_logs.append(msg)
-        except Exception: pass
-
 logger = logging.getLogger("gesture_control.remote")
-logger.addHandler(DashboardLogHandler())
+
+
 
 APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
@@ -955,9 +944,6 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         security.reject_request(req_id)
         return JSONResponse({"ok": True})
 
-    @app.get("/api/hub/logs")
-    async def get_hub_logs() -> JSONResponse:
-        return JSONResponse({"logs": list(hub_logs)})
 
     @app.post("/api/hub/shutdown")
     async def shutdown_hub() -> JSONResponse:
