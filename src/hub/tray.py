@@ -9,38 +9,18 @@ if __name__ == "__main__":
     
     if sys.platform == "win32":
         try:
-            import ctypes, subprocess, time, os
-            my_pid = os.getpid()
+            from src.core.utils import kill_process_on_port, kill_processes_by_name, get_lock
             
-            def get_lock():
-                global _hub_mutex
-                _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkHub")
-                return ctypes.windll.kernel32.GetLastError()
-
+            # Use the robust cleanup logic
+            kill_process_on_port(8000)
+            kill_processes_by_name(["cloudflared", "GestureLink_Hub"])
+            
+            # Use HTTPS if certificates are found, otherwise fallback to HTTP
+            from src.core.utils import resource_path
+            local_proto = "https" if resource_path("cert.pem").exists() else "http"
+            
+            # Double-check lock acquisition
             err = get_lock()
-            if err == 183:
-                print("DEBUG: Mutex collision detected. Cleaning up old session...")
-                
-                # 1. Kill external processes
-                subprocess.run(["taskkill", "/F", "/IM", "cloudflared.exe", "/T"], capture_output=True)
-                subprocess.run(["taskkill", "/F", "/IM", "GestureLink_Hub.exe", "/T"], capture_output=True)
-                
-                # 2. Kill other python Hubs
-                patterns = ["src.hub.tray", "src/hub/tray.py", "src\\hub\\tray.py"]
-                for pattern in patterns:
-                    cmd = f'wmic process where "name=\'python.exe\' and CommandLine like \'%{pattern}%\' and ProcessId != {my_pid}" get ProcessId'
-                    res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                    for line in res.stdout.splitlines():
-                        pid = line.strip()
-                        if pid.isdigit() and int(pid) != my_pid:
-                            print(f"DEBUG: Terminating zombie Hub (PID {pid})...")
-                            try: os.kill(int(pid), 9)
-                            except: pass
-                
-                # 3. Retry acquisition
-                time.sleep(2.0)
-                err = get_lock()
-                
             if err == 183:
                 print("!!! Warning: Another instance is still holding the lock. Please check Task Manager.")
                 sys.exit(1)
@@ -200,11 +180,15 @@ class GestureLinkTray:
     def run_server(self):
         # We now default to HTTP for the local server to avoid 'Self-Signed' SSL trust issues on mobile hotspots.
         # Cloudflare Tunnel will still provide a valid HTTPS URL for the remote web app.
-        ssl_params = {}
-        
-        # Only use SSL if explicitly requested or if we are in a production custom-domain setup
-        # if os.getenv("FORCE_SSL") == "true":
-        #    ... (logic to re-enable)
+        from src.core.utils import resource_path
+        cert = resource_path("cert.pem")
+        key = resource_path("key.pem")
+        if cert.exists() and key.exists():
+            ssl_params = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)}
+            print("[*] Local SSL active.")
+        else:
+            ssl_params = {}
+            print("[*] Local SSL disabled (HTTP mode).")
         
         uvicorn.run(
             "src.hub.server:build_app",

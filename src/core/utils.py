@@ -4,7 +4,18 @@ import sys
 import time
 import psutil
 import socket
+import ctypes
 from pathlib import Path
+
+_hub_mutex = None
+
+def get_lock():
+    """Acquires a global named mutex to ensure only one Hub instance runs."""
+    global _hub_mutex
+    if sys.platform == "win32":
+        _hub_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "GestureLinkHub")
+        return ctypes.windll.kernel32.GetLastError()
+    return 0
 
 
 def resource_path(relative_path: str) -> Path:

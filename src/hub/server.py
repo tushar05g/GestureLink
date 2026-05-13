@@ -265,9 +265,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     # Prioritize HUB_URL from .env if it exists
                     app.state.cloudflare_url = os.getenv("HUB_URL")
                 else:
-                    # Use HTTPS with self-signed certificate for tunnel compatibility
-                    # Cloudflare requires HTTPS to the origin (even if self-signed)
-                    local_proto = "https" 
+                    # Use HTTPS if certificates are found, otherwise fallback to HTTP
+                    from src.core.utils import resource_path
+                    local_proto = "https" if resource_path("cert.pem").exists() else "http"
+                    
                     print(f"  * Attempting Quick Tunnel: {local_proto}://127.0.0.1:{port}")
                     tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://127.0.0.1:{port}"]
                     # Allow self-signed cert for local tunnel connection
