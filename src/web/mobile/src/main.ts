@@ -688,6 +688,12 @@ async function logout() {
   }
   localStorage.removeItem("gesturelink_token");
   localStorage.removeItem("gesturelink_ip");
+  
+  // Clear URL parameters to prevent auto-pairing on reload
+  const url = new URL(window.location.href);
+  url.search = "";
+  window.history.replaceState({}, "", url.toString());
+  
   location.reload();
 }
 

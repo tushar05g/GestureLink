@@ -885,7 +885,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         client_ip = request.client.host if request.client else "0.0.0.0"
         logger.info(f"Pair attempt from {client_ip} ({hostname}) with PIN {pin}")
 
-        if pin != tokens.current_pin:
+        if str(pin) != tokens.current_pin:
             logger.warning(f"Invalid PIN from {client_ip}. Expected {tokens.current_pin}, got {pin}")
             return JSONResponse({"status": "error", "error": "Invalid PIN"}, status_code=401)
 
@@ -918,8 +918,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         """Issue 5: Invalidate token server-side so it cannot be reused."""
         token = payload.get("token")
         if token and token in tokens.valid_tokens:
-            del tokens.valid_tokens[token]
-            logger.info("Token revoked for IP %s", tokens.valid_tokens.get(token, "unknown"))
+            revoked_ip = tokens.valid_tokens.pop(token, "unknown")
+            logger.info("Token revoked for IP %s", revoked_ip)
         return JSONResponse({"ok": True})
 
     @app.get("/api/security/pending")
