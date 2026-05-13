@@ -74,6 +74,7 @@ hidden_imports = [
     "src.core.vision_worker",
     "src.core.utils",
     "src.core.modal_vision",
+    "psutil"
 ]
 
 datas = [

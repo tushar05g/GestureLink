@@ -2,6 +2,8 @@ import math
 import os
 import sys
 import time
+import psutil
+import socket
 from pathlib import Path
 
 
@@ -24,7 +26,53 @@ def resource_path(relative_path: str) -> Path:
     else:
         # Running normally — resolve from project root (two levels above utils.py)
         base = Path(__file__).resolve().parent.parent.parent
-    return base / relative_path
+    
+    res = base / relative_path
+    return res
+
+def kill_process_on_port(port: int):
+    """Kills any process currently using the specified TCP port."""
+    try:
+        import psutil
+        for conn in psutil.net_connections():
+            if conn.laddr.port == port and conn.status == 'LISTEN':
+                try:
+                    p = psutil.Process(conn.pid)
+                    print(f"[*] Port {port} is occupied by {p.name()} (PID: {conn.pid}). Cleaning up...")
+                    p.terminate()
+                    try:
+                        p.wait(timeout=2)
+                    except psutil.TimeoutExpired:
+                        p.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+    except ImportError:
+        print("[!] psutil not found, skipping port cleanup.")
+    except Exception as e:
+        print(f"[!] Error cleaning up port {port}: {e}")
+
+def kill_processes_by_name(name_list: list[str]):
+    """Kills all processes whose names contain any of the strings in name_list."""
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                for target in name_list:
+                    if target.lower() in proc.info['name'].lower():
+                        # Don't kill ourselves
+                        if proc.info['pid'] == os.getpid(): continue
+                        print(f"[*] Found conflicting process: {proc.info['name']} (PID: {proc.info['pid']}). Cleaning up...")
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=2)
+                        except psutil.TimeoutExpired:
+                            proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except ImportError:
+        print("[!] psutil not found, skipping process cleanup.")
+    except Exception as e:
+        print(f"[!] Error cleaning up processes: {e}")
 
 
 class OneEuroFilter:

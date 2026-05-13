@@ -241,24 +241,21 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         def _run_cf():
             try:
                 import re, subprocess, threading, os
-                cmd = "cloudflared"
-                # Check local folder first (for bundled installer), then system paths
-                local_cf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloudflared.exe")
-                root_cf = os.path.join(os.getcwd(), "cloudflared.exe")
-                
-                if os.path.exists(local_cf):
-                    cmd = local_cf
-                elif os.path.exists(root_cf):
-                    cmd = root_cf
-                elif os.name == 'nt':
-                    common_paths = [
-                        os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "cloudflared", "cloudflared.exe"),
-                        os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "cloudflared", "cloudflared.exe"),
-                    ]
-                    for p in common_paths:
-                        if os.path.exists(p):
-                            cmd = p
-                            break
+                from src.core.utils import resource_path
+                # Use bundled cloudflared.exe via resource_path
+                cmd = str(resource_path("cloudflared.exe"))
+                if not os.path.exists(cmd):
+                    # Fallback to system path or common Windows locations
+                    cmd = "cloudflared"
+                    if os.name == 'nt':
+                        common_paths = [
+                            os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "cloudflared", "cloudflared.exe"),
+                            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "cloudflared", "cloudflared.exe"),
+                        ]
+                        for p in common_paths:
+                            if os.path.exists(p):
+                                cmd = p
+                                break
 
                 # Custom Domain support: Use Token if provided in .env
                 cf_token = os.getenv("CLOUDFLARE_TOKEN")
@@ -277,6 +274,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     tunnel_args.extend(["--no-tls-verify", "--origin-server-name", "localhost"])
                     
                     print(f"  * Command: {' '.join(tunnel_args)}")
+
+                # Wait for server to be fully ready before starting tunnel to avoid 502 Bad Gateway
+                time.sleep(2)
 
                 proc = subprocess.Popen(
                     tunnel_args,
@@ -1329,6 +1329,12 @@ def run():
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    
+    # Port 12: Kill existing processes and free up port before starting
+    from src.core.utils import kill_process_on_port, kill_processes_by_name
+    print(f"[*] Initializing Hub on port {args.port}...")
+    kill_process_on_port(args.port)
+    kill_processes_by_name(["cloudflared", "GestureLink_Hub"])
     
     project_root = Path(__file__).resolve().parent.parent.parent
     cert = resource_path("cert.pem")

@@ -111,7 +111,8 @@ hidden_imports = [
     "aiortc.mediastreams",
     "av",
     "pyee",
-    "cryptography"
+    "cryptography",
+    "psutil"
 ]
 
 # ─── Data files to bundle ─────────────────────────────────────────────────────
