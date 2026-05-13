@@ -240,7 +240,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         # --- CLOUDFLARE TUNNEL (Preferred) ---
         def _run_cf():
             try:
-                import re, subprocess, threading, os
+                import re, subprocess, threading, os, time
                 from src.core.utils import resource_path
                 # Use bundled cloudflared.exe via resource_path
                 cmd = str(resource_path("cloudflared.exe"))

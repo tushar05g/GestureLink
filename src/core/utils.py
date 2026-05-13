@@ -47,6 +47,7 @@ def kill_process_on_port(port: int):
         import psutil
         for conn in psutil.net_connections():
             if conn.laddr.port == port and conn.status == 'LISTEN':
+                if conn.pid is None or conn.pid < 10: continue
                 try:
                     p = psutil.Process(conn.pid)
                     print(f"[*] Port {port} is occupied by {p.name()} (PID: {conn.pid}). Cleaning up...")
@@ -68,6 +69,9 @@ def kill_processes_by_name(name_list: list[str]):
         import psutil
         for proc in psutil.process_iter(['pid', 'name']):
             try:
+                # Never kill system processes
+                if proc.info['pid'] < 10: continue
+                
                 for target in name_list:
                     if target.lower() in proc.info['name'].lower():
                         # Don't kill ourselves
