@@ -10,6 +10,7 @@ if ($processes) {
     Write-Host "[!] Found processes using port 8000: $processes" -ForegroundColor Yellow
     
     foreach ($process_id in $processes) {
+        if ($process_id -lt 10) { continue }
         try {
             $process = Get-Process -Id $process_id -ErrorAction SilentlyContinue
             if ($process) {

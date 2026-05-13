@@ -735,8 +735,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         await _handle_ws_message(responder, {"text": message}, None, mouse)
                     except: pass
 
-        # Add Video Track
-        pc.addTrack(HubVideoStreamTrack())
+        # No longer sending video frames from Hub to Mobile to save bandwidth and reduce latency
+        # pc.addTrack(HubVideoStreamTrack())
 
     class HubVideoStreamTrack(VideoStreamTrack):
         def __init__(self):

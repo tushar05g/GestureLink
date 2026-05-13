@@ -524,7 +524,11 @@ async function activatePC(d: any) {
     });
 
     const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
-    if (pcCameraToggle) pcCameraToggle.checked = camRes.active;
+    if (pcCameraToggle) {
+        pcCameraToggle.checked = camRes.active;
+        const parent = pcCameraToggle.closest('.setting-item');
+        if (parent) (parent as HTMLElement).style.display = 'flex';
+    }
     const gestureStatusEl = document.getElementById("remoteGestureStatus");
     if (gestureStatusEl) gestureStatusEl.textContent = camRes.active ? "CAMERA ON" : "CAMERA OFF";
 
