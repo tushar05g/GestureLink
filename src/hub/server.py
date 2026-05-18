@@ -595,12 +595,17 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             hub_camera_active = False
             return
 
+        # Standardize captured frame size to 640x480 for massive CPU and memory savings
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
         hub_camera_active = True
         consecutive_failures = 0
         loop = asyncio.get_event_loop()
         try:
             while app.state.camera_active:
-                ret, frame = cap.read()
+                # Offload blocking I/O frame read to thread pool executor to prevent event loop lag
+                ret, frame = await loop.run_in_executor(None, cap.read)
                 if not ret:
                     consecutive_failures += 1
                     if consecutive_failures > 30:  # ~1 second of failure
@@ -646,12 +651,17 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
                     # --- Annotate and Encode ---
                     annotated_frame = vision_processor.draw_landmarks(frame, state)
-                    _, jpeg = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                    hub_video_frame = jpeg.tobytes()
+                    # Offload CPU-intensive JPEG encoding to thread pool executor
+                    def encode_frame(img):
+                        _, jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        return jpeg.tobytes()
+                    hub_video_frame = await loop.run_in_executor(None, encode_frame, annotated_frame)
                 except Exception as e:
                     logger.error(f"Hub loop error: {e}")
-                    _, frame_jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                    hub_video_frame = frame_jpeg.tobytes()
+                    def encode_fail_frame(img):
+                        _, frame_jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        return frame_jpeg.tobytes()
+                    hub_video_frame = await loop.run_in_executor(None, encode_fail_frame, frame)
                 await asyncio.sleep(0.01) # Reduced to ms for faster response
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")

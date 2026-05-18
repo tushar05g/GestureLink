@@ -124,8 +124,6 @@ async function init() {
 
   // Camera toggle
   const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
-  const hubVideoContainer = document.getElementById("hubVideoContainer")!;
-  const hubVideoPlayer = document.getElementById("hubVideoPlayer") as HTMLVideoElement;
 
   pcCameraToggle?.addEventListener('change', async (e: any) => {
     if (!activePC) {
@@ -163,7 +161,6 @@ async function init() {
       if (!data.ok) throw new Error(data.error);
       
       if (active) {
-        hubVideoContainer.style.display = 'block';
         setupHubWebRTC();
         startCameraPolling(targetParam);
       } else {
@@ -171,7 +168,6 @@ async function init() {
           clearInterval(cameraPollInterval);
           cameraPollInterval = null;
         }
-        hubVideoContainer.style.display = 'none';
         closeWebRTC();
         pcCameraToggle.disabled = false;
         if (remoteGestureStatus) {
@@ -212,10 +208,6 @@ async function init() {
     });
 
     dataChannel = peerConn.createDataChannel("gestures", { ordered: false });
-    
-    peerConn.ontrack = (event) => {
-        hubVideoPlayer.srcObject = event.streams[0];
-    };
 
     const offer = await peerConn.createOffer();
     await peerConn.setLocalDescription(offer);
