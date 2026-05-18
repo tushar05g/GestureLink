@@ -810,8 +810,46 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
     @app.get("/api/hub/camera/status")
-    async def get_hub_camera_status():
-        return JSONResponse({"active": hub_camera_active})
+    async def get_hub_camera_status(target: Optional[str] = Query(None)):
+        lan_ip = detect_lan_ip()
+        
+        ngrok_host = ""
+        if hasattr(app.state, "ngrok_url") and app.state.ngrok_url:
+            from urllib.parse import urlparse
+            ngrok_host = urlparse(app.state.ngrok_url).hostname
+
+        cloudflare_host = ""
+        if hasattr(app.state, "cloudflare_url") and app.state.cloudflare_url:
+            from urllib.parse import urlparse
+            cloudflare_host = urlparse(app.state.cloudflare_url).hostname
+
+        is_hub = (
+            not target
+            or target in ("localhost", "127.0.0.1", lan_ip)
+            or (ngrok_host and target == ngrok_host)
+            or (cloudflare_host and target == cloudflare_host)
+        )
+        
+        if is_hub:
+            status = "inactive"
+            if app.state.camera_active:
+                status = "active" if hub_camera_active else "starting"
+            return JSONResponse({"active": hub_camera_active, "status": status})
+            
+        # Otherwise proxy to agent
+        try:
+            import httpx
+            async with httpx.AsyncClient(verify=False) as client:
+                resp = await client.get(f"https://{target}:8001/api/agent/info", timeout=2.0)
+                data = resp.json()
+                active = data.get("camera_active", False)
+                status = data.get("camera_status")
+                if not status:
+                    status = "active" if active else "inactive"
+                return JSONResponse({"active": active, "status": status})
+        except Exception as e:
+            logger.error("Proxy camera status failed for %s: %s", target, e)
+            return JSONResponse({"active": False, "status": "error", "error": str(e)})
 
     @app.get("/api/hub/mode")
     async def get_hub_mode():

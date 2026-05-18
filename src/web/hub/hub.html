@@ -714,6 +714,16 @@
                     if (!webVideo.srcObject) {
                         placeholder.style.display = "flex";
                         webVideo.style.display = "none";
+                        if (hubCamData.status === "starting") {
+                            placeholder.innerHTML = `
+                                <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
+                                    <i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
+                                    <span style="font-weight: 600; color: #fff;">Initializing Hub Camera...</span>
+                                    <span style="font-size: 0.78rem; color: var(--text-secondary);">Starting hardware driver (takes ~7s)</span>
+                                </div>`;
+                        } else {
+                            placeholder.innerHTML = "Waiting for Camera or Remote Stream...";
+                        }
                     } else {
                         webVideo.style.display = "block";
                         placeholder.style.display = "none";

@@ -6,6 +6,7 @@ let activePC: any = null;
 let devices: any[] = [];
 let authToken = localStorage.getItem("gesturelink_token");
 let hapticsEnabled = localStorage.getItem("gesturelink_haptics") !== "false";
+let cameraPollInterval: any = null;
 
 function getHubBaseUrl(): string {
   const params = new URLSearchParams(window.location.search);
@@ -132,12 +133,27 @@ async function init() {
       pcCameraToggle.checked = false;
       return;
     }
+    
+    const active = e.target.checked;
+    const targetParam = isHubSelfTarget(activePC?.ip, activePC?.hostname)
+      ? ""
+      : `?target=${encodeURIComponent(activePC.ip)}`;
+
+    // Immediately disable toggle and show visual indicator
+    pcCameraToggle.disabled = true;
+    if (active) {
+      if (remoteGestureStatus) {
+        remoteGestureStatus.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 5px;"></i>STARTING...';
+        remoteGestureStatus.style.color = '#ffaa00';
+      }
+    } else {
+      if (remoteGestureStatus) {
+        remoteGestureStatus.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 5px;"></i>STOPPING...';
+        remoteGestureStatus.style.color = 'var(--text-secondary)';
+      }
+    }
+
     try {
-      const active = e.target.checked;
-      // Don't pass target when connected via tunnel - Hub will control itself
-      const targetParam = isHubSelfTarget(activePC?.ip, activePC?.hostname)
-        ? ""
-        : `?target=${encodeURIComponent(activePC.ip)}`;
       const res = await fetch(hubApi(`/api/hub/camera/toggle${targetParam}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -149,17 +165,30 @@ async function init() {
       if (active) {
         hubVideoContainer.style.display = 'block';
         setupHubWebRTC();
+        startCameraPolling(targetParam);
       } else {
+        if (cameraPollInterval) {
+          clearInterval(cameraPollInterval);
+          cameraPollInterval = null;
+        }
         hubVideoContainer.style.display = 'none';
         closeWebRTC();
+        pcCameraToggle.disabled = false;
+        if (remoteGestureStatus) {
+          remoteGestureStatus.innerHTML = "CAMERA OFF";
+          remoteGestureStatus.style.color = "var(--text-secondary)";
+        }
       }
-
-      if (remoteGestureStatus) remoteGestureStatus.textContent = active ? "CAMERA ON" : "CAMERA OFF";
-      console.log("[DEBUG] Camera toggle successful:", { active, target: targetParam });
+      console.log("[DEBUG] Camera toggle request sent:", { active, target: targetParam });
     } catch (err) {
       console.error("[DEBUG] Camera toggle error:", err);
       alert(`Failed to toggle camera: ${err}`);
-      pcCameraToggle.checked = !e.target.checked;
+      pcCameraToggle.disabled = false;
+      pcCameraToggle.checked = !active;
+      if (remoteGestureStatus) {
+        remoteGestureStatus.innerHTML = !active ? "CAMERA ON" : "CAMERA OFF";
+        remoteGestureStatus.style.color = !active ? "var(--accent)" : "var(--text-secondary)";
+      }
     }
   });
 
@@ -501,6 +530,61 @@ async function sendSignal(data: any) {
   });
 }
 
+function startCameraPolling(targetParam: string) {
+  if (cameraPollInterval) clearInterval(cameraPollInterval);
+  const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
+  if (pcCameraToggle) pcCameraToggle.disabled = true;
+  
+  let attempts = 0;
+  const maxAttempts = 15;
+  cameraPollInterval = setInterval(async () => {
+    attempts++;
+    try {
+      const statusRes = await fetch(hubApi(`/api/hub/camera/status${targetParam}`));
+      const statusData = await statusRes.json();
+      if (statusData.status === "active" || statusData.active) {
+        clearInterval(cameraPollInterval);
+        cameraPollInterval = null;
+        if (pcCameraToggle) {
+          pcCameraToggle.disabled = false;
+          pcCameraToggle.checked = true;
+        }
+        if (remoteGestureStatus) {
+          remoteGestureStatus.innerHTML = "CAMERA ON";
+          remoteGestureStatus.style.color = "var(--accent)";
+        }
+        console.log("[DEBUG] Camera is now fully active");
+      } else if (attempts >= maxAttempts) {
+        clearInterval(cameraPollInterval);
+        cameraPollInterval = null;
+        if (pcCameraToggle) {
+          pcCameraToggle.disabled = false;
+          pcCameraToggle.checked = false;
+        }
+        if (remoteGestureStatus) {
+          remoteGestureStatus.innerHTML = "CAMERA OFF";
+          remoteGestureStatus.style.color = "var(--text-secondary)";
+        }
+        alert("Camera initialization timed out. Please check camera connections.");
+      }
+    } catch (pollErr) {
+      console.error("Camera status poll error:", pollErr);
+      if (attempts >= maxAttempts) {
+        clearInterval(cameraPollInterval);
+        cameraPollInterval = null;
+        if (pcCameraToggle) {
+          pcCameraToggle.disabled = false;
+          pcCameraToggle.checked = false;
+        }
+        if (remoteGestureStatus) {
+          remoteGestureStatus.innerHTML = "CAMERA OFF";
+          remoteGestureStatus.style.color = "var(--text-secondary)";
+        }
+      }
+    }
+  }, 1000);
+}
+
 async function activatePC(d: any) {
   activePC = d;
   activeDeviceName.textContent = d.hostname;
@@ -524,13 +608,36 @@ async function activatePC(d: any) {
     });
 
     const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
-    if (pcCameraToggle) {
-        pcCameraToggle.checked = camRes.active;
+    const gestureStatusEl = document.getElementById("remoteGestureStatus");
+    
+    if (camRes.status === "starting") {
+      if (pcCameraToggle) {
+        pcCameraToggle.checked = true;
+        pcCameraToggle.disabled = true;
         const parent = pcCameraToggle.closest('.setting-item');
         if (parent) (parent as HTMLElement).style.display = 'flex';
+      }
+      if (gestureStatusEl) {
+        gestureStatusEl.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 5px;"></i>STARTING...';
+        gestureStatusEl.style.color = '#ffaa00';
+      }
+      startCameraPolling(camStatusTarget);
+    } else {
+      if (cameraPollInterval) {
+        clearInterval(cameraPollInterval);
+        cameraPollInterval = null;
+      }
+      if (pcCameraToggle) {
+        pcCameraToggle.checked = camRes.active;
+        pcCameraToggle.disabled = false;
+        const parent = pcCameraToggle.closest('.setting-item');
+        if (parent) (parent as HTMLElement).style.display = 'flex';
+      }
+      if (gestureStatusEl) {
+        gestureStatusEl.innerHTML = camRes.active ? "CAMERA ON" : "CAMERA OFF";
+        gestureStatusEl.style.color = camRes.active ? "var(--accent)" : "var(--text-secondary)";
+      }
     }
-    const gestureStatusEl = document.getElementById("remoteGestureStatus");
-    if (gestureStatusEl) gestureStatusEl.textContent = camRes.active ? "CAMERA ON" : "CAMERA OFF";
 
   } catch (_) {}
 }

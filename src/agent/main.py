@@ -31,6 +31,7 @@ pyautogui.FAILSAFE = False
 
 SECRET_TOKEN = ""
 camera_active = False
+camera_initialized = False
 camera_task = None
 vision = None
 mouse = None
@@ -78,11 +79,15 @@ async def ping():
 @app.get("/api/agent/info")
 async def agent_info():
     """Returns agent status info for the Hub dashboard."""
+    status = "inactive"
+    if camera_active:
+        status = "active" if camera_initialized else "starting"
     return {
         "hostname": socket.gethostname(),
         "ip": _detect_lan_ip(),
         "port": 8001,
         "camera_active": camera_active,
+        "camera_status": status
     }
 
 @app.post("/api/security/fix-firewall")
@@ -139,31 +144,40 @@ async def set_settings(payload: dict):
     return {"ok": True, "trackpad_sensitivity": CONFIG.gesture.trackpad_sensitivity}
 
 async def _camera_loop():
-    global camera_active, vision, mouse
-    cap = cv2.VideoCapture(0)
-    while camera_active:
-        ret, frame = cap.read()
-        if not ret:
+    global camera_active, camera_initialized, vision, mouse
+    camera_initialized = False
+    cap = None
+    try:
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            camera_initialized = True
+        while camera_active:
+            ret, frame = cap.read()
+            if not ret:
+                await asyncio.sleep(0.01)
+                continue
+            
+            # Mirror the frame so cursor movement matches hand direction.
+            # Without this, lm[8].x increases left-to-right in the RAW frame,
+            # but the physical hand appears mirrored → cursor moves opposite.
+            # The Hub does the same flip in _hub_camera_loop().
+            frame = cv2.flip(frame, 1)
+            
+            # Process frame via AsyncVisionWorker
+            # Returns tuple: (GestureState, annotated_bytes) or None
+            result = await vision.process_frame(frame)
+            if result:
+                state, _ = result
+                mouse.update(state)
+            
+            # Small sleep to yield to event loop
             await asyncio.sleep(0.01)
-            continue
-        
-        # Mirror the frame so cursor movement matches hand direction.
-        # Without this, lm[8].x increases left-to-right in the RAW frame,
-        # but the physical hand appears mirrored → cursor moves opposite.
-        # The Hub does the same flip in _hub_camera_loop().
-        frame = cv2.flip(frame, 1)
-        
-        # Process frame via AsyncVisionWorker
-        # Returns tuple: (GestureState, annotated_bytes) or None
-        result = await vision.process_frame(frame)
-        if result:
-            state, _ = result
-            mouse.update(state)
-        
-        # Small sleep to yield to event loop
-        await asyncio.sleep(0.01)
-    
-    cap.release()
+    except Exception as e:
+        logging.error(f"Agent camera loop encountered error: {e}")
+    finally:
+        if cap:
+            cap.release()
+        camera_initialized = False
 
 @app.post("/api/camera/toggle")
 async def toggle_camera(payload: dict):
