@@ -1038,6 +1038,15 @@
             if (data.hostname) document.getElementById('hub-name-input').value = data.hostname;
         });
 
+        // Auto-shutdown server when dashboard is closed
+        window.addEventListener('beforeunload', () => {
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon('/api/hub/shutdown');
+            } else {
+                fetch('/api/hub/shutdown', { method: 'POST', keepalive: true }).catch(() => console.log);
+            }
+        });
+
         initLocalWS();
         pollSignals();
         fetchUpdates().then(() => {
