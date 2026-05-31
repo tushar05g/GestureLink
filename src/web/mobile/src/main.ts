@@ -64,8 +64,8 @@ const customTarget = document.getElementById("customTarget") as HTMLInputElement
 const saveAppShortcut = document.getElementById("saveAppShortcut")!;
 const closeAppModal = document.getElementById("closeAppModal")!;
 const keyboardInput = document.getElementById("keyboardInput") as HTMLInputElement;
-const copyBtn = document.getElementById("copyBtn")!;
-const pasteBtn = document.getElementById("pasteBtn")!;
+const leftArrowBtn = document.getElementById("leftArrowBtn")!;
+const rightArrowBtn = document.getElementById("rightArrowBtn")!;
 const kbBtn = document.getElementById("kbBtn")!;
 
 // --- Initialization ---
@@ -938,12 +938,12 @@ function setupKeyboardToolbar() {
     triggerHaptic(ImpactStyle.Light);
   };
 
-  copyBtn.onclick = () => {
-    sendHotkey(['ctrl', 'c']);
+  leftArrowBtn.onclick = () => {
+    sendHotkey(['left']);
   };
 
-  pasteBtn.onclick = () => {
-    sendHotkey(['ctrl', 'v']);
+  rightArrowBtn.onclick = () => {
+    sendHotkey(['right']);
   };
 
   keyboardInput.addEventListener('keydown', (e) => {
