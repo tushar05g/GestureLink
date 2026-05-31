@@ -124,7 +124,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     from src.core.vision import VisionProcessor, Gesture
     from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
     from src.core.vision_worker import AsyncVisionWorker
-    from src.core.modes import CanvasController, BuilderController
+    from src.core.modes import MeetPaintController, BuilderController
 
     def _open_dashboard():
         import webbrowser, subprocess, os, time
@@ -381,8 +381,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     app.state.camera_active = False
     app.state.camera_task = None
     app.state.mouse = mouse
-    app.state.active_mode = 0 # 0=Cursor, 1=Canvas, 2=Builder
-    app.state.canvas = CanvasController(CONFIG)
+    app.state.active_mode = 0  # 0=Cursor, 1=MeetPaint, 2=Builder
+    app.state.meet_paint = MeetPaintController(CONFIG)
     app.state.builder = BuilderController(CONFIG)
     
     # Shared state — track live WebSocket sessions for the dashboard
@@ -627,13 +627,24 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
                     # --- Handle Mode Switching ---
                     if state.mode_switch:
+                        old_mode = app.state.active_mode
                         app.state.active_mode = (app.state.active_mode + 1) % 3
                         logger.info(f"Mode switched! Active: {app.state.active_mode}")
+                        # Meet Paint overlay lifecycle
+                        if app.state.active_mode == 1:
+                            app.state.meet_paint.start()
+                        elif old_mode == 1:
+                            app.state.meet_paint.stop()
 
                     # --- Mode Logic ---
-                    if app.state.active_mode == 1: # CANVAS
-                        app.state.canvas.update(state.gesture.value, state.cursor_x, state.cursor_y)
-                        state.canvas_paths = app.state.canvas.paths
+                    if app.state.active_mode == 1: # MEET PAINT
+                        import pyautogui
+                        sw, sh = pyautogui.size()
+                        app.state.meet_paint.update(
+                            state.gesture.value,
+                            state.cursor_x, state.cursor_y,
+                            sw, sh
+                        )
                     elif app.state.active_mode == 2: # BUILDER
                         if state.gesture == Gesture.THUMB_PINCH:
                              app.state.builder.handle_thumb_pinch_drag(

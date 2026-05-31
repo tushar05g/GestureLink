@@ -587,7 +587,7 @@ class VisionProcessor:
 
         # ── Draw Premium HUD Overlay ────────────────────────────────────────
         active = state.gesture and state.gesture != Gesture.IDLE
-        mode_text = "[BUILDER]" if state.active_mode == 2 else "[CANVAS]" if state.active_mode == 1 else "[CURSOR]"
+        mode_text = "[BUILDER]" if state.active_mode == 2 else "[MEET PAINT]" if state.active_mode == 1 else "[CURSOR]"
         label = f"{mode_text} {state.gesture.upper()}" if active else f"{mode_text} SCANNING..."
         color = (0, 255, 149) if active else (200, 200, 200)
 

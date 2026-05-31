@@ -2,6 +2,7 @@
 modes.py — Mode state machine.
 
 PRODUCTIVITY : cursor/click/scroll via controller.py
+MEET_PAINT   : transparent screen annotation overlay (replaces Canvas)
 BUILDER      : 3D cube builder via OpenGL
 """
 from __future__ import annotations
@@ -11,6 +12,8 @@ from enum import Enum, auto
 from typing import Optional
 
 import numpy as np
+
+from src.core.meet_overlay import MeetOverlay
 
 logger = logging.getLogger(__name__)
 
@@ -31,57 +34,125 @@ except ImportError:
 
 class AppMode(Enum):
     PRODUCTIVITY = auto()
-    CANVAS       = auto()
+    MEET_PAINT   = auto()   # replaces Canvas — draws on transparent screen overlay
     BUILDER      = auto()
 
 
-class CanvasController:
+class MeetPaintController:
     """
-    2D Whiteboard logic:
-      - Tracks "paths" (list of points)
-      - Index+Middle pinch → Draw
-      - Scroll → Erase nearest path
-      - Rock sign → Undo
+    Meet Paint mode logic — draws transparent annotations directly on the screen.
+
+    Gesture mapping
+    ---------------
+      POINTING   (index only)          → Laser pointer dot
+      PINCH      (index + middle)      → Draw ink stroke
+      RIGHT_CLICK (rock sign)          → Erase nearest stroke
+      SCROLL     (3 fingers, 2s hold)  → Clear all strokes
+      MODE_SWITCH (pinky hold)         → Exit mode (handled by VisionProcessor)
     """
+
+    # Number of consecutive SCROLL frames required before clearing (~2s @ 30fps)
+    _CLEAR_HOLD_REQUIRED: int = 60
+
     def __init__(self, cfg) -> None:
-        self.paths: list[list[tuple[float, float, tuple[int,int,int]]]] = []
-        self._current_path: list[tuple[float, float, tuple[int,int,int]]] = []
-        self._last_point: Optional[tuple[float, float]] = None
-        self._undo_stack: list[list] = []
-        self.brush_size = 5
-        self.active_color = (0, 255, 149) # Neon Green
+        self.cfg = cfg
+        self.overlay = MeetOverlay()
+        self._drawing = False
+        self._clear_hold: int = 0
+        self.active_color: str = "#FF4757"   # default: red
+        self.brush_size:   int = 4
 
-    def update(self, gesture: str, nx: float, ny: float) -> str:
-        status = "CANVAS"
-        
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Open the overlay window. Call when entering MEET_PAINT mode."""
+        self.overlay.set_color(self.active_color)
+        self.overlay.set_size(self.brush_size)
+        self.overlay.start()
+        logger.info("MeetPaintController: overlay started.")
+
+    def stop(self) -> None:
+        """Close the overlay window. Call when leaving MEET_PAINT mode."""
+        self.overlay.stop()
+        self._drawing = False
+        self._clear_hold = 0
+        logger.info("MeetPaintController: overlay stopped.")
+
+    # ------------------------------------------------------------------
+    # Per-frame update (called by server.py camera loop)
+    # ------------------------------------------------------------------
+
+    def update(self, gesture: str, nx: float, ny: float,
+               screen_w: int, screen_h: int) -> str:
+        """Translate gesture + normalised finger coords → overlay draw calls.
+
+        Parameters
+        ----------
+        gesture  : gesture string from GestureClassifier
+        nx, ny   : normalised [0-1] fingertip coordinates
+        screen_w, screen_h : current screen resolution in pixels
+        """
+        sx = int(nx * screen_w)
+        sy = int(ny * screen_h)
+
+        # --- Draw stroke (index + middle = PINCH) ---
         if gesture == "PINCH":
-            # Drawing
-            point = (nx, ny, self.active_color)
-            if not self._current_path:
-                self._current_path = [point]
-            else:
-                self._current_path.append(point)
-            status = "DRAWING"
-        else:
-            # Lifted pen
-            if self._current_path:
-                self.paths.append(self._current_path)
-                self._current_path = []
-            
-            if gesture == "SCROLL":
-                if self.paths:
-                    self.paths.pop() # Simple erase for now
-                    status = "ERASING"
-            elif gesture == "RIGHT_CLICK":
-                if self.paths:
-                    self.paths.pop()
-                    status = "UNDO"
-        
-        return status
+            self._clear_hold = 0
+            self.overlay.draw_stroke(sx, sy, self.active_color)
+            self.overlay.clear_laser()
+            self._drawing = True
+            return "DRAWING"
 
-    def clear(self):
-        self.paths = []
-        self._current_path = []
+        # --- Pen lifted (any non-PINCH gesture ends the stroke) ---
+        if self._drawing:
+            self.overlay.lift_pen()
+            self._drawing = False
+
+        # --- Laser pointer (index only = POINTING) ---
+        if gesture == "POINTING":
+            self._clear_hold = 0
+            self.overlay.draw_laser(sx, sy)
+            return "LASER"
+        else:
+            self.overlay.clear_laser()
+
+        # --- Erase nearest stroke (rock sign = RIGHT_CLICK) ---
+        if gesture == "RIGHT_CLICK":
+            self._clear_hold = 0
+            self.overlay.erase_nearest(sx, sy)
+            return "ERASE"
+
+        # --- Clear all strokes (3 fingers up = SCROLL, hold 2 seconds) ---
+        if gesture == "SCROLL":
+            self._clear_hold += 1
+            progress = self._clear_hold / self._CLEAR_HOLD_REQUIRED
+            if self._clear_hold >= self._CLEAR_HOLD_REQUIRED:
+                self.overlay.clear_all()
+                self._clear_hold = 0
+                logger.info("MeetPaintController: canvas cleared by gesture.")
+                return "CLEAR"
+            return f"HOLD TO CLEAR {int(progress * 100)}%"
+
+        self._clear_hold = 0
+        return "MEET_PAINT"
+
+    # ------------------------------------------------------------------
+    # Remote control (called by hub API endpoints)
+    # ------------------------------------------------------------------
+
+    def set_color(self, hex_color: str) -> None:
+        self.active_color = hex_color
+        self.overlay.set_color(hex_color)
+
+    def set_size(self, px: int) -> None:
+        self.brush_size = px
+        self.overlay.set_size(px)
+
+    def remote_clear(self) -> None:
+        """Clear all strokes (triggered from hub dashboard or mobile)."""
+        self.overlay.clear_all()
 
 
 class BuilderController:
