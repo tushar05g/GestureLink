@@ -23,6 +23,8 @@ function getHubBaseUrl(): string {
 
 const HUB_BASE_URL = getHubBaseUrl();
 const HUB_HOSTNAME = new URL(HUB_BASE_URL).hostname;
+// Expose for inline Meet Paint scripts in index.html
+(window as any)._hubBase = HUB_BASE_URL;
 
 function isHubSelfTarget(target?: string | null, hostname?: string | null): boolean {
   if (hostname && /^hub\b/i.test(String(hostname).trim())) return true;
@@ -245,6 +247,10 @@ async function init() {
           modeBtns.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           triggerHaptic(ImpactStyle.Medium);
+          // Sync Meet Paint panel visibility
+          if (typeof (window as any)._syncMeetPaintPanel === 'function') {
+            (window as any)._syncMeetPaintPanel(mode);
+          }
         }
       } catch (err) {
         console.error("Failed to set mode:", err);
@@ -598,6 +604,10 @@ async function activatePC(d: any) {
       if (parseInt((b as HTMLElement).dataset.mode || "0") === modeRes.mode) b.classList.add('active');
       else b.classList.remove('active');
     });
+    // Sync Meet Paint panel visibility
+    if (typeof (window as any)._syncMeetPaintPanel === 'function') {
+      (window as any)._syncMeetPaintPanel(modeRes.mode);
+    }
 
     const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
     const gestureStatusEl = document.getElementById("remoteGestureStatus");
@@ -1014,6 +1024,7 @@ function setupPinInputs() {
   });
 
   pairBtn.onclick = async () => {
+    pairError.style.opacity = '0';
     const pin = Array.from(pinInputs).map(i => i.value).join("");
     await autoPair(pin);
   };
@@ -1056,6 +1067,7 @@ async function autoPair(pin: string) {
       pairStatusText.textContent = "";
     }
   } catch (e) {
+    pairError.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Network error (Tunnel still starting?)';
     pairError.style.opacity = '1';
     pairStatusText.textContent = "";
   }
