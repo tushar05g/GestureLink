@@ -99,7 +99,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        "tkinter",
         "scipy",
         "IPython",
         "notebook",

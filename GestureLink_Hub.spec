@@ -149,7 +149,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         # Exclude large packages we don't need
-        "tkinter",
         "scipy",
         "IPython",
         "notebook",
