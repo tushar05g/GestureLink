@@ -230,22 +230,36 @@ class MeetOverlay:
     def _do_draw_stroke(self, sx: int, sy: int, color: str) -> None:
         if not self._canvas:
             return
-        if self._prev_x is not None and self._prev_y is not None:
+            
+        if not hasattr(self, '_current_stroke_coords'):
+            self._current_stroke_coords = []
+            
+        if not self._current_stroke_ids:
+            self._current_stroke_coords = [sx, sy]
+            self._current_stroke_ids.append(-1)
+            return
+
+        self._current_stroke_coords.extend([sx, sy])
+
+        if self._current_stroke_ids[0] == -1:
             line_id = self._canvas.create_line(
-                self._prev_x, self._prev_y, sx, sy,
+                *self._current_stroke_coords,
                 fill=color,
                 width=self.size,
                 capstyle=tk.ROUND,
                 joinstyle=tk.ROUND,
                 smooth=True,
             )
-            self._current_stroke_ids.append(line_id)
-        self._prev_x, self._prev_y = sx, sy
+            self._current_stroke_ids[0] = line_id
+        else:
+            self._canvas.coords(self._current_stroke_ids[0], *self._current_stroke_coords)
 
     def _do_lift_pen(self) -> None:
-        if self._current_stroke_ids:
+        if self._current_stroke_ids and self._current_stroke_ids[0] != -1:
             self._all_stroke_ids.append(list(self._current_stroke_ids))
-            self._current_stroke_ids = []
+        self._current_stroke_ids = []
+        if hasattr(self, '_current_stroke_coords'):
+            self._current_stroke_coords = []
         self._prev_x = None
         self._prev_y = None
 

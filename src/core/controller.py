@@ -53,9 +53,9 @@ class MouseController:
         self.cfg.screen_h = sh
 
         # Adaptive Smoothing: One Euro Filter
-        # freq=30 (matches camera), mincutoff=0.01 (heavy smooth at stop), beta=0.01 (low lag at speed)
-        self._filter_x = OneEuroFilter(freq=30, mincutoff=0.01, beta=0.01)
-        self._filter_y = OneEuroFilter(freq=30, mincutoff=0.01, beta=0.01)
+        # freq=30 (matches camera), mincutoff=0.5 (less lag at rest), beta=0.05 (less lag at speed)
+        self._filter_x = OneEuroFilter(freq=30, mincutoff=0.5, beta=0.05)
+        self._filter_y = OneEuroFilter(freq=30, mincutoff=0.5, beta=0.05)
 
         self._smooth_x: float = cfg.screen_w / 2.0
         self._smooth_y: float = cfg.screen_h / 2.0
