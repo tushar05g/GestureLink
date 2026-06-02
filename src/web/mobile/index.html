@@ -1157,8 +1157,149 @@
       color: var(--accent);
     }
 
+    /* ================================
+       MEET PAINT PANEL
+    ================================ */
+    #meetPaintPanel {
+      display: none;
+      animation: tabFadeIn 0.25s ease-out;
+    }
+
+    #meetPaintPanel.visible {
+      display: block;
+    }
+
+    .color-palette {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .color-swatch {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2.5px solid transparent;
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      flex-shrink: 0;
+    }
+
+    .color-swatch:active {
+      transform: scale(0.88);
+    }
+
+    .color-swatch.selected {
+      border-color: #fff;
+      box-shadow: 0 0 0 3px rgba(255,255,255,0.2);
+      transform: scale(1.12);
+    }
+
+    .color-swatch-custom {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px dashed rgba(255,255,255,0.25);
+      background: var(--surface-hover);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      color: var(--text-secondary);
+      transition: all 0.15s;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .color-swatch-custom input[type="color"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .color-swatch-custom:active {
+      transform: scale(0.88);
+    }
+
+    .paint-clear-btn {
+      width: 100%;
+      padding: 12px;
+      border-radius: var(--radius-md);
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+      background: rgba(255, 59, 92, 0.08);
+      border: 1.5px solid rgba(255, 59, 92, 0.25);
+      color: var(--danger);
+      cursor: pointer;
+      transition: all 0.18s;
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .paint-clear-btn:active {
+      background: rgba(255, 59, 92, 0.18);
+      transform: scale(0.97);
+    }
+
+    .brush-size-row {
+      margin-top: 14px;
+    }
+
+    .brush-size-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 10px;
+    }
+
+    .brush-size-label span {
+      font-size: 0.72rem;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .paint-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 99px;
+      background: rgba(0, 255, 149, 0.08);
+      border: 1px solid rgba(0, 255, 149, 0.2);
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+    }
+
+    .paint-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: paintDotPulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes paintDotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
     /* Scroll indicator / top padding for first section */
-    .tab-content>.section-label:first-child {
+    .tab-content > .section-label:first-child {
       margin-top: 4px;
     }
   </style>
@@ -1282,13 +1423,54 @@
             </button>
             <button class="mode-btn" data-mode="1">
               <i class="fas fa-paint-brush" style="display:block; margin-bottom:5px; font-size:1rem;"></i>
-              CANVAS
+              MEET PAINT
             </button>
             <button class="mode-btn" data-mode="2">
               <i class="fas fa-cube" style="display:block; margin-bottom:5px; font-size:1rem;"></i>
               BUILDER
             </button>
           </div>
+        </div>
+
+        <!-- Meet Paint Control Panel (visible only when mode 1 is active) -->
+        <div id="meetPaintPanel" class="card">
+          <div class="card-title">
+            <span>Meet Paint Controls</span>
+            <span class="paint-status-badge">
+              <span class="paint-status-dot"></span>
+              LIVE
+            </span>
+          </div>
+
+          <!-- Color Palette -->
+          <div style="font-size: 0.68rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px;">Ink Colour</div>
+          <div class="color-palette" id="colorPalette">
+            <div class="color-swatch selected" data-color="#FF4757" style="background:#FF4757;" title="Red"></div>
+            <div class="color-swatch" data-color="#FF9F43" style="background:#FF9F43;" title="Orange"></div>
+            <div class="color-swatch" data-color="#FFDD59" style="background:#FFDD59;" title="Yellow"></div>
+            <div class="color-swatch" data-color="#00FF95" style="background:#00FF95;" title="Green"></div>
+            <div class="color-swatch" data-color="#54A0FF" style="background:#54A0FF;" title="Blue"></div>
+            <div class="color-swatch" data-color="#FFFFFF" style="background:#FFFFFF;" title="White"></div>
+            <div class="color-swatch-custom" title="Custom colour">
+              <i class="fas fa-eye-dropper" style="font-size:0.85rem; pointer-events:none;"></i>
+              <input type="color" id="customColorPicker" value="#FF4757">
+            </div>
+          </div>
+
+          <!-- Brush Size -->
+          <div class="brush-size-row">
+            <div class="brush-size-label">
+              Brush Size
+              <span id="brushSizeVal">4px</span>
+            </div>
+            <input type="range" id="brushSizeRange" min="2" max="18" value="4">
+          </div>
+
+          <!-- Clear All -->
+          <button class="paint-clear-btn" id="paintClearBtn">
+            <i class="fas fa-trash-alt"></i>
+            Clear All Strokes
+          </button>
         </div>
 
         <!-- Trackpad Card -->
@@ -1489,6 +1671,99 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
     }
+
+    // ============================================================
+    //  Meet Paint Remote Control
+    // ============================================================
+
+    // --- Hub base URL helper (resolved once token is in place) ---
+    function getHubBase() {
+      // main.ts stores this on window after pairing
+      return window._hubBase || '';
+    }
+
+    // Active colour state (mirrors the overlay default)
+    let _mpColor = '#FF4757';
+
+    async function _meetPaintPost(endpoint, body) {
+      try {
+        const token = localStorage.getItem('gesturelink_token');
+        const base  = getHubBase();
+        await fetch(`${base}/api/hub/meet-paint/${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? {'X-Token': token} : {}) },
+          body: JSON.stringify(body),
+        });
+      } catch (e) {
+        console.warn(`meet-paint/${endpoint} failed:`, e);
+      }
+    }
+
+    // --- Color swatch click ---
+    document.getElementById('colorPalette').addEventListener('click', (e) => {
+      const swatch = e.target.closest('.color-swatch');
+      if (!swatch) return;
+      const color = swatch.dataset.color;
+      _setMeetPaintColor(color);
+    });
+
+    // --- Custom colour picker ---
+    const _customPicker = document.getElementById('customColorPicker');
+    _customPicker.addEventListener('input', (e) => {
+      _setMeetPaintColor(e.target.value, true);
+    });
+
+    function _setMeetPaintColor(color, fromCustom = false) {
+      _mpColor = color;
+      // Update swatch selection highlight
+      document.querySelectorAll('.color-swatch').forEach(s => {
+        s.classList.toggle('selected', s.dataset.color === color);
+      });
+      if (!fromCustom) {
+        _customPicker.value = color;
+      }
+      _meetPaintPost('color', { color });
+    }
+
+    // --- Brush size slider (debounced) ---
+    let _brushTimer = null;
+    const _brushRange = document.getElementById('brushSizeRange');
+    const _brushVal   = document.getElementById('brushSizeVal');
+    _brushRange.addEventListener('input', (e) => {
+      const size = parseInt(e.target.value, 10);
+      _brushVal.textContent = size + 'px';
+      clearTimeout(_brushTimer);
+      _brushTimer = setTimeout(() => {
+        _meetPaintPost('size', { size });
+      }, 300);
+    });
+
+    // --- Clear All button ---
+    document.getElementById('paintClearBtn').addEventListener('click', () => {
+      if (!confirm('Clear all strokes from the screen?')) return;
+      _meetPaintPost('clear', {});
+    });
+
+    // --- Show / hide Meet Paint panel when mode changes ---
+    // (main.ts also calls fetch /api/hub/mode — we hook the mode buttons here
+    //  so the panel appears immediately without waiting for JS module load)
+    function _syncMeetPaintPanel(modeIndex) {
+      const panel = document.getElementById('meetPaintPanel');
+      if (panel) {
+        panel.classList.toggle('visible', modeIndex === 1);
+      }
+    }
+
+    // Intercept mode-button clicks before main.ts takes over
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const m = parseInt(btn.dataset.mode, 10);
+        _syncMeetPaintPanel(m);
+      });
+    });
+
+    // Expose so main.ts can also call it after polling /api/hub/mode
+    window._syncMeetPaintPanel = _syncMeetPaintPanel;
   </script>
   <script type="module" src="/src/main.ts"></script>
 </body>

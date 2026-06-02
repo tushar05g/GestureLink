@@ -124,36 +124,49 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     from src.core.vision import VisionProcessor, Gesture
     from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
     from src.core.vision_worker import AsyncVisionWorker
-    from src.core.modes import CanvasController, BuilderController
+    from src.core.modes import MeetPaintController, BuilderController
 
     def _open_dashboard():
-        import webbrowser, subprocess, os, time
-        # Give the tunnel 3 seconds to establish
-        time.sleep(3.0) 
-        
+        import webbrowser, subprocess, os, time, ssl, urllib.request
+
         proto = "https" if CERT_PEM.exists() else "http"
         local_url = f"{proto}://localhost:{port}/hub"
-        
-        # Prioritize remote URL (Cloudflare > ngrok > Deployment > Localhost)
-        remote_url = (
-            getattr(app.state, "cloudflare_url", None) or 
-            getattr(app.state, "ngrok_url", None) or 
-            os.getenv("NGROK_URL")
-        )
-        target_url = remote_url if remote_url else local_url
-        
-        # Ensure we always open the /hub dashboard path on the PC
-        if not target_url.endswith("/hub"):
-            target_url = target_url.rstrip("/") + "/hub"
-        
-        # If we are falling back to localhost, show a debug popup
-        if target_url == local_url:
-            try:
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(0, "App is running on local host (No active tunnel detected)", "GestureLink Debug", 0x40)
-            except: pass
 
-        # Attempt to use Chrome/Edge in App Mode for a "Clean" window
+        # HUB_URL is ONLY set by users who intentionally configured a custom domain.
+        # Regular users installing via Inno Setup will NEVER have this — they get
+        # localhost which is instant, requires zero config, and never fails.
+        hub_url = os.getenv("HUB_URL")
+
+        if hub_url:
+            # ── CUSTOM DOMAIN ────────────────────────────────────────────────
+            # User has their own domain pointed at this tunnel.
+            # Probe the health endpoint until cloudflared connects, then open.
+            target_url = hub_url.rstrip("/") + "/hub"
+            health_url = hub_url.rstrip("/") + "/health"
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode    = ssl.CERT_NONE
+
+            print(f"  * Custom domain detected — waiting for tunnel ({health_url})...")
+            for attempt in range(40):           # probe every 0.5s, up to 20s
+                try:
+                    urllib.request.urlopen(health_url, timeout=2, context=ctx)
+                    print(f"  * Tunnel live ({attempt * 0.5:.1f}s) — opening dashboard.")
+                    break
+                except Exception:
+                    time.sleep(0.5)
+            # Open even if timed out — tunnel may still be warming up
+        else:
+            # ── DEFAULT (Inno Setup installs / no config) ────────────────────
+            # Quick Tunnels (random trycloudflare.com URLs) take 10-30s to
+            # propagate through Cloudflare's edge — opening them immediately
+            # causes Error 1033.  The phone scans the QR code on the dashboard
+            # to get that URL.  The PC dashboard itself is always localhost.
+            target_url = local_url
+            time.sleep(1.0)     # 1s — just enough for uvicorn to be serving
+
+        # Open Chrome/Edge in App Mode for a clean borderless window
         app_paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -166,9 +179,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     subprocess.Popen([path, f"--app={target_url}"])
                     return
                 except: pass
-                
-        # Fallback to default browser
-        webbrowser.open(target_url)
+
+        webbrowser.open(target_url)     # fallback to system default browser
 
     # --- LIFESPAN HANDLER (Startup/Shutdown) ---
     @asynccontextmanager
@@ -381,8 +393,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     app.state.camera_active = False
     app.state.camera_task = None
     app.state.mouse = mouse
-    app.state.active_mode = 0 # 0=Cursor, 1=Canvas, 2=Builder
-    app.state.canvas = CanvasController(CONFIG)
+    app.state.active_mode = 0  # 0=Cursor, 1=MeetPaint, 2=Builder
+    app.state.meet_paint = MeetPaintController(CONFIG)
     app.state.builder = BuilderController(CONFIG)
     
     # Shared state — track live WebSocket sessions for the dashboard
@@ -627,13 +639,34 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
                     # --- Handle Mode Switching ---
                     if state.mode_switch:
+                        old_mode = app.state.active_mode
                         app.state.active_mode = (app.state.active_mode + 1) % 3
                         logger.info(f"Mode switched! Active: {app.state.active_mode}")
+                        # Meet Paint overlay lifecycle
+                        if app.state.active_mode == 1:
+                            app.state.meet_paint.start()
+                        elif old_mode == 1:
+                            app.state.meet_paint.stop()
 
                     # --- Mode Logic ---
-                    if app.state.active_mode == 1: # CANVAS
-                        app.state.canvas.update(state.gesture.value, state.cursor_x, state.cursor_y)
-                        state.canvas_paths = app.state.canvas.paths
+                    if app.state.active_mode == 1: # MEET PAINT
+                        import pyautogui
+                        sw, sh = pyautogui.size()
+                        # Translate cursor-mode gesture names → meet-paint gesture names.
+                        # VisionProcessor.classify_cursor() emits LEFT_CLICK / INDEX_MOVE,
+                        # but MeetPaintController.update() expects PINCH / POINTING.
+                        _MEET_PAINT_MAP = {
+                            "LEFT_CLICK":  "PINCH",       # index + middle → draw stroke
+                            "INDEX_MOVE":  "POINTING",    # index only     → laser pointer
+                            "RIGHT_CLICK": "RIGHT_CLICK", # rock sign      → erase nearest
+                            "SCROLL":      "SCROLL",      # 3 fingers      → hold-to-clear
+                        }
+                        mp_gesture = _MEET_PAINT_MAP.get(state.gesture.value, state.gesture.value)
+                        app.state.meet_paint.update(
+                            mp_gesture,
+                            state.cursor_x, state.cursor_y,
+                            sw, sh
+                        )
                     elif app.state.active_mode == 2: # BUILDER
                         if state.gesture == Gesture.THUMB_PINCH:
                              app.state.builder.handle_thumb_pinch_drag(
@@ -868,9 +901,43 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.post("/api/hub/mode")
     async def set_hub_mode(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         mode = payload.get("mode", 0)
-        app.state.active_mode = mode % 3
-        logger.info(f"Hub mode set to {app.state.active_mode} via API")
-        return JSONResponse({"ok": True, "mode": app.state.active_mode})
+        old_mode = app.state.active_mode
+        new_mode = mode % 3
+        app.state.active_mode = new_mode
+        logger.info(f"Hub mode set to {new_mode} via API (was {old_mode})")
+        # Manage Meet Paint overlay lifecycle
+        if new_mode == 1 and old_mode != 1:
+            app.state.meet_paint.start()
+            logger.info("MeetPaintController: overlay started via API mode switch.")
+        elif old_mode == 1 and new_mode != 1:
+            app.state.meet_paint.stop()
+            logger.info("MeetPaintController: overlay stopped via API mode switch.")
+        return JSONResponse({"ok": True, "mode": new_mode})
+
+    # --- Meet Paint Remote Control Endpoints ---
+
+    @app.post("/api/hub/meet-paint/color")
+    async def set_meet_paint_color(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Change the active ink colour for the Meet Paint overlay."""
+        color = payload.get("color", "#FF4757")
+        app.state.meet_paint.set_color(color)
+        logger.info(f"MeetPaint color set to {color}")
+        return JSONResponse({"ok": True, "color": color})
+
+    @app.post("/api/hub/meet-paint/size")
+    async def set_meet_paint_size(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Change the brush size (stroke width in px) for the Meet Paint overlay."""
+        size = int(payload.get("size", 4))
+        app.state.meet_paint.set_size(size)
+        logger.info(f"MeetPaint size set to {size}")
+        return JSONResponse({"ok": True, "size": size})
+
+    @app.post("/api/hub/meet-paint/clear")
+    async def clear_meet_paint(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Wipe all strokes from the Meet Paint overlay (remote clear)."""
+        app.state.meet_paint.remote_clear()
+        logger.info("MeetPaint: canvas cleared via API")
+        return JSONResponse({"ok": True})
 
     @app.get("/api/hub/info")
     async def get_hub_info():
@@ -1356,7 +1423,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             logger.info(f"QR pointing to Vercel: {target}")
         else:
             # HUB is running on localhost/LAN with no tunnel -> show direct IP link
-            proto = "http"
+            proto = "https" if CERT_PEM.exists() else "http"
             lan_ip = detect_lan_ip()
             target = f"{proto}://{lan_ip}:{port}"
             logger.info(f"QR pointing to LAN: {target}")
