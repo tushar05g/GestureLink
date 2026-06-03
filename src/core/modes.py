@@ -14,6 +14,7 @@ from typing import Optional
 import numpy as np
 
 from src.core.meet_overlay import MeetOverlay
+from src.core.builder_overlay import BuilderOverlay
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class MeetPaintController:
         self.overlay = MeetOverlay()
         self._drawing = False
         self._clear_hold: int = 0
+        self._lost_frames: int = 0
         self.active_color: str = "#FF4757"   # default: red
         self.brush_size:   int = 4
 
@@ -94,6 +96,15 @@ class MeetPaintController:
         nx, ny   : normalised [0-1] fingertip coordinates
         screen_w, screen_h : current screen resolution in pixels
         """
+        # --- Handling tracking drops ---
+        if gesture == "IDLE":
+            self._lost_frames += 1
+            if self._lost_frames < 5:
+                # Hand briefly lost, maintain current state
+                return "BUFFERING"
+        else:
+            self._lost_frames = 0
+
         sx = int(nx * screen_w)
         sy = int(ny * screen_h)
 
@@ -160,8 +171,11 @@ class BuilderController:
     All Builder Mode logic:
       - Ghost cube / paint / erase / undo
       - Pinch → move single cube or group
-      - Two-hand rotate + zoom via GL camera
+      - Two-hand rotate + zoom (placeholder — camera attr kept for compat)
       - Toggle button (single/group move)
+
+    Rendering is done via a fullscreen Tkinter overlay (BuilderOverlay),
+    mirroring the MeetPaint architecture.  No GLFW/OpenGL is required.
     """
 
     def __init__(self, cfg) -> None:
@@ -196,8 +210,33 @@ class BuilderController:
         self._prev_right_index: Optional[tuple] = None
         self._prev_thumb_index_dist: Optional[float] = None
 
-        # GL camera reference — set by app.py after GL window opens
+        # Camera attribute kept for backwards-compatibility; not used by Tkinter overlay
         self.camera = None
+
+        # Tkinter fullscreen overlay
+        self.overlay = BuilderOverlay(cfg)
+
+        # Pinky-hold tracking for progress bar
+        self._pinky_hold_frames:   int = 0
+        self._PINKY_HOLD_REQUIRED: int = 20
+
+    # ------------------------------------------------------------------
+    # Lifecycle (mirrors MeetPaintController)
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Open the overlay window. Call when entering BUILDER mode."""
+        self.overlay.start()
+        logger.info("BuilderController: overlay started.")
+
+    def stop(self) -> None:
+        """Close the overlay window. Call when leaving BUILDER mode."""
+        self.overlay.stop()
+        self._painting     = False
+        self._paint_hold   = 0
+        self._ghost        = None
+        self._erase_ghost  = None
+        logger.info("BuilderController: overlay stopped.")
 
     # ------------------------------------------------------------------
     # Called every frame from app.py
@@ -234,10 +273,11 @@ class BuilderController:
         status = "BUILDER"
 
         # ---- Two-hand: left fist active → rotate / zoom -----------------
-        if gesture_state.left_fist and self.camera is not None:
+        if gesture_state.left_fist:
             status = self._handle_two_hand(gesture_state)
             # Reset single-hand state
             self._prev_right_index = None
+            self._push_render(nx, ny, status)
             return status
         else:
             self._prev_right_index      = None
@@ -297,7 +337,20 @@ class BuilderController:
             self._paint_hold = 0
             self._stop_drag()
 
+        self._push_render(nx, ny, status)
         return status
+
+    def _push_render(self, nx: float, ny: float, status: str) -> None:
+        """Push current world state to the overlay for immediate rendering."""
+        pinky_prog = self._pinky_hold_frames / self._PINKY_HOLD_REQUIRED
+        self.overlay.update(
+            world          = self.world,
+            ghost          = self._ghost,
+            erase_ghost    = self._erase_ghost,
+            status         = status,
+            pinky_progress = pinky_prog,
+            cursor_norm    = (nx, ny),
+        )
 
     # ------------------------------------------------------------------
     def handle_thumb_pinch_drag(

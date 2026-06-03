@@ -116,6 +116,13 @@ try:
         Mimics the interface of local MediaPipe detection.
         """
         def __init__(self):
+            import modal.config
+            token_id = os.environ.get("MODAL_TOKEN_ID")
+            token_secret = os.environ.get("MODAL_TOKEN_SECRET")
+            if token_id and token_secret:
+                modal.config.config.override_locally("token_id", token_id)
+                modal.config.config.override_locally("token_secret", token_secret)
+                
             self._worker = modal.Cls.from_name(
                 "gesture-control-vision", "VisionWorker"
             )()

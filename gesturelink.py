@@ -49,6 +49,12 @@ def main():
     # BUILDER (Placeholder)
     subparsers.add_parser("builder", help="Research mode: Builder Mode (Research Phase)")
 
+    # BOOTSTRAP
+    subparsers.add_parser("bootstrap", help="Launch the Bootstrap Server for temp sessions")
+
+    # STANDALONE
+    subparsers.add_parser("standalone", help="Launch standalone headless mode (No Browser Hub)")
+
     args = parser.parse_args()
 
     if args.command == "hub":
@@ -74,6 +80,16 @@ def main():
         
     elif args.command == "builder":
         print("[BUILDER] Builder Mode is currently in Research Phase. See builder_mode_research.md")
+        
+    elif args.command == "bootstrap":
+        print("[BOOTSTRAP] Starting Bootstrap Server...")
+        from src.core.bootstrap_server import run_bootstrap_server
+        run_bootstrap_server()
+        
+    elif args.command == "standalone":
+        print("[STANDALONE] Starting Gesture Control in standalone mode...")
+        from src.core.app import run
+        run()
         
     else:
         parser.print_help()

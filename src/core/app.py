@@ -2,7 +2,7 @@
 app.py — Main loop. Routes gesture state to Productivity or Builder mode.
 
 Productivity: OpenCV window + mouse control
-Builder:      GLFW + PyOpenGL 3D window
+Builder:      Tkinter fullscreen overlay
 """
 from __future__ import annotations
 
@@ -130,8 +130,6 @@ def run() -> None:
     builder  = BuilderController(cfg)
     mode     = AppMode.PRODUCTIVITY
 
-    # GL window (lazy init when entering Builder mode)
-    gl_win = None
 
     # Thumb pinch drag state (Builder)
     _thumb_pinch_start: Optional[tuple] = None
@@ -147,7 +145,7 @@ def run() -> None:
                 continue
 
             # --- Vision (pass builder flag for correct classifier) ---
-            gs = vision.process_frame(frame, builder_mode=(mode == AppMode.BUILDER))
+            gs = vision.process_frame_sync(frame, builder_mode=(mode == AppMode.BUILDER))
 
             # --- Mode switch ---
             if gs.mode_switch:
@@ -155,25 +153,9 @@ def run() -> None:
                 logger.info("Switched to %s", mode.name)
 
                 if mode == AppMode.BUILDER:
-                    # Open GL window
-                    try:
-                        from gl_window import GLWindow
-                        gl_win = GLWindow(cfg, builder.world)
-                        if gl_win.open():
-                            builder.camera = gl_win._renderer.camera
-                        else:
-                            logger.error("GL window failed — staying in Productivity")
-                            mode = AppMode.PRODUCTIVITY
-                            gl_win = None
-                    except Exception as e:
-                        logger.error("GL init error: %s", e)
-                        mode = AppMode.PRODUCTIVITY
-                        gl_win = None
+                    builder.start()
                 else:
-                    if gl_win:
-                        gl_win.close()
-                        gl_win = None
-                    builder.camera = None
+                    builder.stop()
 
                 _thumb_pinch_start = None
                 _thumb_pinch_held  = False
@@ -191,6 +173,9 @@ def run() -> None:
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     break
+                # Detect if user clicked the 'X' (cross) on the OpenCV window
+                if cv2.getWindowProperty(oc.window_title, cv2.WND_PROP_VISIBLE) < 1:
+                    break
 
             # ---- Builder Mode -------------------------------------------
             else:
@@ -203,7 +188,7 @@ def run() -> None:
                     if not _thumb_pinch_held:
                         _thumb_pinch_start = (nx, ny)
                         _thumb_pinch_held  = True
-                    status = builder.handle_thumb_pinch_drag(
+                    builder.handle_thumb_pinch_drag(
                         nx, ny, fw, fh,
                         drag_start_norm=_thumb_pinch_start,
                         is_dragging=True,
@@ -217,27 +202,9 @@ def run() -> None:
                         )
                     _thumb_pinch_held  = False
                     _thumb_pinch_start = None
-                    status = builder.update(
+                    builder.update(
                         gs.gesture.value, nx, ny, fw, fh, gs
                     )
-
-                # Render GL frame
-                if gl_win and gl_win.is_open():
-                    selected_set = set(builder.world.selected_group)
-                    pinky_prog   = vision._pinky_hold_frames / vision._PINKY_HOLD_REQUIRED
-                    gl_win.render_frame(
-                        ghost        = builder.ghost,
-                        erase_ghost  = builder.erase_ghost,
-                        selected_set = selected_set,
-                        webcam_frame = frame,
-                        status       = status,
-                        mode_str     = "BUILDER MODE",
-                        pinky_progress = pinky_prog,
-                    )
-                else:
-                    # GL window closed externally — return to productivity
-                    mode = AppMode.PRODUCTIVITY
-                    gl_win = None
 
                 # Keep CV window alive for Q to quit
                 cv2.waitKey(1)
@@ -247,8 +214,7 @@ def run() -> None:
     finally:
         cap.release()
         cv2.destroyAllWindows()
-        if gl_win:
-            gl_win.close()
+        builder.stop()
         vision.close()
         logger.info("Stopped.")
 

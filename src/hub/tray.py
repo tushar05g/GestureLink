@@ -174,8 +174,14 @@ class GestureLinkTray:
 
     def on_quit(self):
         print("Shutting down GestureLink...")
+        try:
+            from src.core.utils import kill_processes_by_name
+            kill_processes_by_name(["cloudflared"])
+        except Exception:
+            pass
         if self.icon:
             self.icon.stop()
+        os._exit(0)
 
     def run_server(self):
         # We now default to HTTP for the local server to avoid 'Self-Signed' SSL trust issues on mobile hotspots.

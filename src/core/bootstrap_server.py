@@ -143,36 +143,25 @@ class BootstrapManager:
         proc = session.process
         if proc and proc.poll() is None:
             try:
-                # Start-new-session process group: terminate all children if any.
-                os.killpg(proc.pid, signal.SIGTERM)
-            except Exception:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-            try:
+                proc.terminate()
                 proc.wait(timeout=4)
             except Exception:
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.kill()
                 except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
+                    pass
 
         with self._lock:
             session.status = reason
             session.process = None
 
     def _start_agent_process(self, session: AgentSession) -> subprocess.Popen[Any]:
-        repo_root = Path(__file__).resolve().parents[1]
-        run_py = repo_root / "run.py"
-
+        repo_root = Path(__file__).resolve().parents[2]
+        
         cmd = [
             sys.executable,
-            str(run_py),
-            "--agent",
+            "-m",
+            "src.agent.main",
             "--relay-ws",
             session.relay_ws,
             "--agent-id",
@@ -182,10 +171,15 @@ class BootstrapManager:
             cmd.extend(["--agent-token", session.token])
 
         logger.info("Starting temp agent for session %s", session.session_id)
+        creationflags = 0
+        if sys.platform == "win32":
+            import subprocess
+            creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x00000200)
+            
         return subprocess.Popen(
             cmd,
             cwd=str(repo_root),
-            start_new_session=True,
+            creationflags=creationflags,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -231,14 +225,17 @@ class BootstrapManager:
             return False
 
     def _trigger_auto_install(self) -> None:
-        """Runs the install_service.sh script in the background."""
-        repo_root = Path(__file__).resolve().parents[1]
-        install_sh = repo_root / "install_service.sh"
-        if install_sh.exists():
+        """Runs the Windows GUI installer."""
+        repo_root = Path(__file__).resolve().parents[2]
+        installer = repo_root / "src" / "hub" / "gui_installer.py"
+        if installer.exists():
             logger.info("Triggering automatic service installation...")
             try:
-                # Run with sudo if available, or just run normally
-                subprocess.Popen(["bash", str(install_sh)], cwd=str(repo_root), start_new_session=True)
+                creationflags = 0
+                if sys.platform == "win32":
+                    import subprocess
+                    creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x00000200)
+                subprocess.Popen([sys.executable, str(installer)], cwd=str(repo_root), creationflags=creationflags)
             except Exception as e:
                 logger.error("Failed to trigger auto-install: %s", e)
 

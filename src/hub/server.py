@@ -26,27 +26,9 @@ import uvicorn
 import qrcode
 import socket
 import websockets
-# from pyngrok import ngrok, conf
 
-# Heavy imports deferred to avoid module double-load errors in subprocesses
-# from src.core.controller import MouseController
-# from src.core.vision import VisionProcessor
-# from src.core.vision_worker import AsyncVisionWorker
 from src.core.utils import resource_path
-
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-from aiortc.mediastreams import MediaStreamError
-from av import VideoFrame
-
-# Checklist:
-# | 1 | Hub starts without any error. | ✅ Passed | No startup errors. |
-# | 2 | QR code and pin showing on hub UI. | ✅ Passed | Dynamic IP detection working. |
-# | 4 | Hub-mobile connection is perfect. | ✅ Passed | User confirmed successful control. |
-# | 5 | Instant cursor control shift to mobile. | ✅ Passed | Verified by user. |
-# | 8 | Hub camera working for gestures. | 🛠 Testing | Fixed loop logic. |
-# | 11 | Mobile UI button for Hub camera. | ✅ Passed | New "Remote Intelligence" card. |
-# | 14 | Multiprocessing for Vision. | ✅ Passed | Implemented and verified. |
-# | 13 | Entire flow working without lag. | ⏳ Testing | Throttled and optimized. |
+from aiortc import RTCPeerConnection, RTCSessionDescription
 
 load_dotenv()
 logger = logging.getLogger("gesture_control.remote")
@@ -55,22 +37,17 @@ class EndpointFilter(logging.Filter):
     """Silences aggressive polling logs for specific endpoints."""
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
-        # Silence heartbeat endpoints
         silence = [
             "/api/security/pending",
-            "/api/hub/camera/status",
             "/api/connected-clients",
             "/api/discovered"
         ]
         return not any(path in msg for path in silence)
 
 
-# Global state for camera streaming
+# Camera loop liveness flags (used by _hub_camera_loop and /api/hub/camera/status)
 hub_video_frame: bytes | None = None
 hub_camera_active: bool = False
-logger = logging.getLogger("gesture_control.remote")
-
-
 
 APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
@@ -590,6 +567,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         for idx in indices:
             logger.info(f"Hub camera loop: Trying index {idx}...")
             cap = cv2.VideoCapture(idx)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if cap.isOpened():
                 # Test a read
                 ret, _ = cap.read()
@@ -647,11 +625,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             app.state.meet_paint.start()
                         elif old_mode == 1:
                             app.state.meet_paint.stop()
+                        # Builder overlay lifecycle
+                        if app.state.active_mode == 2:
+                            app.state.builder.start()
+                        elif old_mode == 2:
+                            app.state.builder.stop()
 
                     # --- Mode Logic ---
                     if app.state.active_mode == 1: # MEET PAINT
-                        import pyautogui
-                        sw, sh = pyautogui.size()
+                        from src.core.config import CONFIG
+                        sw, sh = CONFIG.screen_w, CONFIG.screen_h
                         # Translate cursor-mode gesture names → meet-paint gesture names.
                         # VisionProcessor.classify_cursor() emits LEFT_CLICK / INDEX_MOVE,
                         # but MeetPaintController.update() expects PINCH / POINTING.
@@ -677,32 +660,25 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             app.state.builder.update(
                                 state.gesture.value, state.cursor_x, state.cursor_y, 640, 480, state
                             )
-                        state.builder_ghost = app.state.builder.ghost
-                        state.builder_world = app.state.builder.world
+                        # Overlay is updated inside builder.update() / handle_thumb_pinch_drag()
                     elif app.state.active_mode == 0 and state.gesture != Gesture.IDLE:
                         mouse.update(state)
 
-                    # --- Annotate and Encode ---
-                    annotated_frame = vision_processor.draw_landmarks(frame, state)
-                    # Offload CPU-intensive JPEG encoding to thread pool executor
-                    def encode_frame(img):
-                        _, jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                        return jpeg.tobytes()
-                    hub_video_frame = await loop.run_in_executor(None, encode_frame, annotated_frame)
+                    # --- Annotate and Encode (only needed when not in a mode that has its own overlay) ---
+                    if app.state.active_mode == 0:
+                        annotated_frame = vision_processor.draw_landmarks(frame, state)
+                        def encode_frame(img):
+                            _, jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            return jpeg.tobytes()
+                        hub_video_frame = await loop.run_in_executor(None, encode_frame, annotated_frame)
                 except Exception as e:
                     logger.error(f"Hub loop error: {e}")
-                    def encode_fail_frame(img):
-                        _, frame_jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                        return frame_jpeg.tobytes()
-                    hub_video_frame = await loop.run_in_executor(None, encode_fail_frame, frame)
-                await asyncio.sleep(0.01) # Reduced to ms for faster response
+                await asyncio.sleep(0.01)
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")
         finally:
             if cap: cap.release()
             app.state.camera_active = False
-            hub_camera_active = False
-            hub_video_frame = None
             logger.info("Hub camera loop: Terminated.")
 
     @app.post("/api/hub/camera/toggle")
@@ -778,37 +754,6 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         await _handle_ws_message(responder, {"text": message}, None, mouse)
                     except: pass
 
-        # No longer sending video frames from Hub to Mobile to save bandwidth and reduce latency
-        # pc.addTrack(HubVideoStreamTrack())
-
-    class HubVideoStreamTrack(VideoStreamTrack):
-        def __init__(self):
-            super().__init__()
-            self._frame_count = 0
-
-        async def recv(self):
-            global hub_video_frame
-            if not hub_video_frame:
-                # Wait for a frame or return a black/placeholder frame to keep the stream alive
-                await asyncio.sleep(0.1)
-                # In a real scenario, we might want to throw a specific error or send a blank frame
-                # For now, just wait.
-                return await self.recv()
-            
-            # Convert bytes to VideoFrame
-            from PIL import Image
-            import numpy as np
-            
-            img = Image.open(io.BytesIO(hub_video_frame)).convert("RGB")
-            frame = VideoFrame.from_image(img)
-            frame.pts = self._frame_count
-            frame.time_base = 1 / 30
-            self._frame_count += 1
-            
-            # Throttle to ~30fps to save bandwidth
-            await asyncio.sleep(1/30)
-            return frame
-
     @app.post("/api/webrtc/offer")
     async def webrtc_offer(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
@@ -838,19 +783,6 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
         })
-
-    @app.get("/api/hub/camera/stream")
-    async def hub_camera_stream():
-        async def frame_generator():
-            global hub_video_frame
-            last_frame = None
-            while hub_camera_active:
-                if hub_video_frame and hub_video_frame is not last_frame:
-                    last_frame = hub_video_frame
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + hub_video_frame + b'\r\n')
-                await asyncio.sleep(0.01)  # Faster stream updates
-        return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
     @app.get("/api/hub/camera/status")
     async def get_hub_camera_status(target: Optional[str] = Query(None)):
@@ -938,6 +870,52 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         app.state.meet_paint.remote_clear()
         logger.info("MeetPaint: canvas cleared via API")
         return JSONResponse({"ok": True})
+
+    @app.get("/api/hub/modal/status")
+    async def get_modal_status():
+        """Returns the connection status and latency of the Modal cloud inference."""
+        import os
+        from src.core.vision import VisionProcessor
+        # Check if USE_MODAL is true in env
+        use_modal = os.environ.get("USE_MODAL", "false").lower() == "true"
+        client = None
+        if hasattr(app.state, 'vision_processor') and hasattr(app.state.vision_processor, '_modal_client'):
+            client = app.state.vision_processor._modal_client
+            
+        return JSONResponse({
+            "enabled": use_modal,
+            "connected": bool(client)
+        })
+
+    @app.post("/api/hub/modal/toggle")
+    async def toggle_modal(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """Enables or disables Modal cloud inference dynamically."""
+        import os
+        from dotenv import set_key
+        
+        enabled = payload.get("enabled", False)
+        val = "true" if enabled else "false"
+        os.environ["USE_MODAL"] = val
+        
+        env_path = os.path.join(APP_DIR, ".env")
+        if os.path.exists(env_path):
+            set_key(env_path, "USE_MODAL", val)
+            
+        # If enabling and client doesn't exist, we must re-init the vision processor's client
+        if enabled and hasattr(app.state, 'vision_processor'):
+            if not app.state.vision_processor._modal_client:
+                from src.core.modal_vision import get_modal_client
+                app.state.vision_processor._modal_client = get_modal_client()
+                
+        # Also update the worker process if it exists
+        if enabled and hasattr(app.state, 'vision') and app.state.vision:
+            # We don't have a direct way to update the vision_worker's env inside its process
+            # easily without a restart, but we can restart the worker.
+            app.state.vision.stop()
+            app.state.vision.start()
+
+        logger.info(f"Modal cloud inference set to: {enabled}")
+        return JSONResponse({"ok": True, "enabled": enabled})
 
     @app.get("/api/hub/info")
     async def get_hub_info():
