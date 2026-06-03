@@ -1,5 +1,20 @@
 import './style.css'
 import { ImpactStyle } from '@capacitor/haptics';
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, set, onValue } from "firebase/database";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCN_N58BRlmUjraIyLDtvQlK3BBlzklces",
+  authDomain: "gesturelink-5db9c.firebaseapp.com",
+  databaseURL: "https://gesturelink-5db9c-default-rtdb.firebaseio.com",
+  projectId: "gesturelink-5db9c",
+  storageBucket: "gesturelink-5db9c.firebasestorage.app",
+  messagingSenderId: "744761635621",
+  appId: "1:744761635621:web:66ccd1d53b405c059f60cc"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db = getDatabase(fbApp);
 
 // --- State ---
 let activePC: any = null;
@@ -44,7 +59,7 @@ function hubApi(path: string): string {
 // WebRTC State
 let peerConn: RTCPeerConnection | null = null;
 let dataChannel: RTCDataChannel | null = null;
-let myPeerId = Math.random().toString(36).substring(7);
+// myPeerId removed
 
 // DOM Elements
 const pairingOverlay = document.getElementById("pairingOverlay")!;
@@ -411,19 +426,14 @@ globalThis.connectToPC = async (i: number) => {
 
     ws.onerror = (err) => {
       console.error("[DEBUG] WebSocket Connection Error:", err);
-      console.error("[DEBUG] Network Details:", {
-        location: HUB_BASE_URL,
-        target_ip: d.ip,
-        protocol: proto,
-        hostname: HUB_HOSTNAME,
-        wsUrl: wsUrl
-      });
-      alert(`⚠️ Could not connect to ${d.hostname}.\n\nEnsure the Hub is running and on the same network.`);
       if (connectBtn) {
         connectBtn.textContent = 'Connect';
         connectBtn.classList.remove('connecting');
       }
-      renderDeviceList();
+      
+      // FALLBACK TO FIREBASE WEBRTC IF LAN WEBSOCKET FAILS
+      console.log("WebSocket failed. Falling back to Firebase WebRTC signaling.");
+      initWebRTC(true);
     };
 
     ws.onclose = (event) => {
@@ -476,57 +486,74 @@ globalThis.connectToPC = async (i: number) => {
   }
 };
 
-async function initWebRTC() {
+async function initWebRTC(isFallback = false) {
   if (peerConn) peerConn.close();
   
-  // Enhanced ICE configuration for hotspot support
+  // Commercial TURN Server (Metered.ca)
   const iceServers = [
     { urls: ["stun:stun.l.google.com:19302"] },
     { urls: ["stun:stun1.l.google.com:19302"] },
-    // TURN server for double-NAT traversal (hotspot fallback)
     {
-      urls: ["turn:numb.viagenie.ca"],
-      username: "webrtc@example.com",
-      credential: "webrtcpassword"
+      urls: ["turn:global.relay.metered.ca:80", "turn:global.relay.metered.ca:443"],
+      username: "d120fb319dff30d8d011f0cf",
+      credential: "W0oY1T/dC+8v3hQf"
     }
   ];
   
   peerConn = new RTCPeerConnection({ iceServers });
 
-  peerConn.onicecandidate = (e) => {
-    if (e.candidate) sendSignal({ type: "candidate", candidate: e.candidate });
-  };
-
+  // Mobile always creates DataChannel
   dataChannel = peerConn.createDataChannel("commands", { ordered: false, maxRetransmits: 0 });
-  dataChannel.onopen = () => console.log("WebRTC DataChannel OPEN! (0-latency mode active)");
+  dataChannel.onopen = () => {
+      console.log("WebRTC DataChannel OPEN! (0-latency mode active)");
+      connBadge.textContent = "ONLINE (P2P)";
+      connBadge.classList.add('online');
+      if (isFallback) {
+          activeDeviceName.textContent = "PC (Remote)";
+          activeDeviceIP.textContent = "WebRTC";
+          document.getElementById('disconnectBtn')?.classList.add('visible');
+          pairingOverlay.style.display = 'none';
+      }
+  };
   dataChannel.onclose = () => dataChannel = null;
 
   const offer = await peerConn.createOffer();
   await peerConn.setLocalDescription(offer);
-  sendSignal({ type: "offer", sdp: offer.sdp });
+  
+  // Get current PIN
+  let pin = "";
+  const autoPin = new URLSearchParams(globalThis.location.search).get('pin');
+  if (autoPin) pin = autoPin;
+  else pin = Array.from(document.querySelectorAll<HTMLInputElement>(".pin-box")).map(i => i.value).join("");
+  
+  if (!pin) {
+      console.error("No PIN available for Firebase signaling");
+      return;
+  }
 
-  (async () => {
-    while (peerConn) {
-      try {
-        const res = await fetch(hubApi(`/api/webrtc/signal/${myPeerId}`));
-        const data = await res.json();
-        if (data.ok && data.signal) {
-          if (data.signal.type === "answer") await peerConn.setRemoteDescription(new RTCSessionDescription(data.signal));
-          else if (data.signal.type === "candidate") await peerConn.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
-        }
-      } catch (e) { }
-      await new Promise(r => setTimeout(r, 100)); // 100ms polling for instant handshake
-    }
-  })();
-}
+  // Write offer to Firebase
+  console.log("Writing offer to Firebase...");
+  const sessionRef = ref(db, `sessions/${pin}/mobile`);
+  await set(sessionRef, {
+      offer: { sdp: offer.sdp, type: offer.type },
+      timestamp: Date.now()
+  });
 
-async function sendSignal(data: any) {
-  await fetch(hubApi("/api/webrtc/signal/hub_pc"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from: myPeerId, ...data })
+  // Listen for Hub's answer
+  const answerRef = ref(db, `sessions/${pin}/hub`);
+  const unsubscribe = onValue(answerRef, async (snapshot) => {
+      const data = snapshot.val();
+      if (data && data.answer) {
+          console.log("Received answer from Firebase!");
+          if (peerConn && peerConn.signalingState !== "stable") {
+              await peerConn.setRemoteDescription(new RTCSessionDescription(data.answer));
+              unsubscribe(); // Stop listening once answered
+          }
+      }
   });
 }
+
+// sendSignal removed because Firebase is used now
 
 function startCameraPolling(targetParam: string) {
   if (cameraPollInterval) clearInterval(cameraPollInterval);
@@ -1067,9 +1094,9 @@ async function autoPair(pin: string) {
       pairStatusText.textContent = "";
     }
   } catch (e) {
-    pairError.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Network error (Tunnel still starting?)';
-    pairError.style.opacity = '1';
-    pairStatusText.textContent = "";
+    console.log("Network error (LAN unreachable). Falling back to Firebase WebRTC directly.");
+    // Bypass token logic and jump straight to WebRTC over Firebase
+    finalizePairing("firebase-webrtc-only");
   }
 }
 

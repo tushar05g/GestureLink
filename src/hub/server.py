@@ -227,77 +227,80 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         
         asyncio.create_task(_signaling_listener())
 
-        # --- CLOUDFLARE TUNNEL (Preferred) ---
-        def _run_cf():
-            try:
-                import re, subprocess, threading, os, time
-                from src.core.utils import resource_path
-                # Use bundled cloudflared.exe via resource_path
-                cmd = str(resource_path("cloudflared.exe"))
-                if not os.path.exists(cmd):
-                    # Fallback to system path or common Windows locations
-                    cmd = "cloudflared"
-                    if os.name == 'nt':
-                        common_paths = [
-                            os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "cloudflared", "cloudflared.exe"),
-                            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "cloudflared", "cloudflared.exe"),
-                        ]
-                        for p in common_paths:
-                            if os.path.exists(p):
-                                cmd = p
-                                break
-
-                # Custom Domain support: Use Token if provided in .env
-                cf_token = os.getenv("CLOUDFLARE_TOKEN")
-                if cf_token:
-                    print(f"  * Starting Persistent Tunnel with Token...")
-                    tunnel_args = [cmd, "tunnel", "--no-autoupdate", "run", "--token", cf_token]
-                    # Prioritize HUB_URL from .env if it exists
-                    app.state.cloudflare_url = os.getenv("HUB_URL")
-                else:
-                    # Use HTTPS if certificates are found, otherwise fallback to HTTP
-                    from src.core.utils import resource_path
-                    local_proto = "https" if resource_path("cert.pem").exists() else "http"
+        # --- FIREBASE SIGNALING (Replaces Cloudflare) ---
+        async def _firebase_signaling_loop():
+            import httpx
+            import time
+            from aiortc import RTCConfiguration, RTCIceServer
+            
+            FIREBASE_URL = "https://gesturelink-5db9c-default-rtdb.firebaseio.com"
+            logger.info("Firebase Signaling active. Waiting for mobile peer...")
+            
+            while True:
+                pin = tokens.current_pin
+                if not pin:
+                    await asyncio.sleep(1)
+                    continue
                     
-                    print(f"  * Attempting Quick Tunnel: {local_proto}://127.0.0.1:{port}")
-                    tunnel_args = [cmd, "tunnel", "--url", f"{local_proto}://127.0.0.1:{port}"]
-                    # Allow self-signed cert for local tunnel connection
-                    tunnel_args.extend(["--no-tls-verify", "--origin-server-name", "localhost"])
-                    
-                    print(f"  * Command: {' '.join(tunnel_args)}")
-
-                # Wait for server to be fully ready before starting tunnel to avoid 502 Bad Gateway
-                time.sleep(2)
-
-                proc = subprocess.Popen(
-                    tunnel_args,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                )
-                app.state.cf_proc = proc
+                try:
+                    async with httpx.AsyncClient() as client:
+                        # Poll the mobile offer
+                        res = await client.get(f"{FIREBASE_URL}/sessions/{pin}/mobile.json")
+                        data = res.json()
+                        
+                        if data and "offer" in data and not getattr(app.state, "firebase_answered_pin", None) == pin:
+                            logger.info(f">>> Received Remote Offer via Firebase (PIN {pin})!")
+                            offer_data = data["offer"]
+                            offer = RTCSessionDescription(sdp=offer_data["sdp"], type=offer_data["type"])
+                            
+                            pc = RTCPeerConnection(configuration=RTCConfiguration(
+                                iceServers=[
+                                    RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
+                                    RTCIceServer(urls=["stun:stun1.l.google.com:19302"]),
+                                    RTCIceServer(urls=["stun:stun2.l.google.com:19302"]),
+                                    RTCIceServer(
+                                        urls=["turn:global.relay.metered.ca:80"],
+                                        username="d120fb319dff30d8d011f0cf", # Temporary public Metered credential
+                                        credential="W0oY1T/dC+8v3hQf"
+                                    ),
+                                    RTCIceServer(
+                                        urls=["turn:global.relay.metered.ca:443"],
+                                        username="d120fb319dff30d8d011f0cf",
+                                        credential="W0oY1T/dC+8v3hQf"
+                                    )
+                                ]
+                            ))
+                            setup_pc(pc)
+                            
+                            await pc.setRemoteDescription(offer)
+                            answer = await pc.createAnswer()
+                            await pc.setLocalDescription(answer)
+                            
+                            # Write answer back to Firebase
+                            ans_payload = {
+                                "sdp": pc.localDescription.sdp,
+                                "type": pc.localDescription.type
+                            }
+                            await client.put(f"{FIREBASE_URL}/sessions/{pin}/hub/answer.json", json=ans_payload)
+                            logger.info("<<< Sent Remote Answer via Firebase. Handshake complete.")
+                            app.state.firebase_answered_pin = pin
+                            
+                        # If a candidate is sent by mobile
+                        if data and "candidates" in data:
+                            for idx, cand in data["candidates"].items():
+                                # In a real implementation we add ICE candidates dynamically,
+                                # but aiortc handles them via SDP or addIceCandidate.
+                                pass
+                                
+                except Exception as e:
+                    pass
                 
-                # Monitor logs for the random .trycloudflare.com URL
-                for line in iter(proc.stdout.readline, ""):
-                    # Look for the URL regardless of whether we have a token (for verification)
-                    match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
-                    if match:
-                        detected_url = match.group(0)
-                        if not app.state.cloudflare_url:
-                            app.state.cloudflare_url = detected_url
-                        logger.info("Cloudflare Tunnel active: %s", detected_url)
-                        # Don't break; keep logging in the background
-            except Exception as e:
-                print(f"  ! Cloudflare Error: {e}")
-                logger.error("Cloudflare Tunnel failed: %s", e)
+                await asyncio.sleep(1.5)
 
-        import threading
-        threading.Thread(target=_run_cf, daemon=True).start()
+        app.state.firebase_task = asyncio.create_task(_firebase_signaling_loop())
 
         discovery.start()
-        # Wait a bit for Cloudflare (if it's starting)
-        for _ in range(50): # Wait up to 5 seconds
-            if getattr(app.state, "cloudflare_url", None): break
-            await asyncio.sleep(0.1)
+        # Removed Cloudflare wait loop
 
         lan_ip = detect_lan_ip()
         proto = "https" if CERT_PEM.exists() else "http"
@@ -334,9 +337,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         #     ngrok.disconnect(app.state.ngrok_url)
         #     ngrok.kill()
             
-        if hasattr(app.state, "cf_proc"):
-            logger.info("Closing Cloudflare tunnel...")
-            app.state.cf_proc.terminate()
+        # Cloudflare tunnel logic removed
             
         discovery.stop()
         vision_worker.stop()

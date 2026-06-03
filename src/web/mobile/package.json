@@ -17,6 +17,7 @@
     "@capacitor/cli": "^6.0.0",
     "@capacitor/core": "^6.0.0",
     "@capacitor/device": "^6.0.0",
-    "@capacitor/haptics": "^6.0.0"
+    "@capacitor/haptics": "^6.0.0",
+    "firebase": "^12.14.0"
   }
 }
