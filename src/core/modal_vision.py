@@ -131,16 +131,29 @@ try:
         async def detect(self, frame_bgr) -> dict:
             import cv2
             import asyncio
-            _, buf = cv2.imencode(".jpg", frame_bgr,
-                                  [cv2.IMWRITE_JPEG_QUALITY, 80])
+            
+            if hasattr(self, '_current_task') and self._current_task is not None:
+                if not self._current_task.done():
+                    # Modal is still processing a previous frame. Fallback instantly.
+                    return {"hands": []}
+                else:
+                    self._current_task = None
+
+            _, buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            
+            self._current_task = asyncio.create_task(
+                asyncio.to_thread(self._worker.detect.remote, buf.tobytes())
+            )
+            
             try:
-                # Use to_thread to safely call the remote Modal function
-                return await asyncio.wait_for(
-                    asyncio.to_thread(self._worker.detect.remote, buf.tobytes()), 
-                    timeout=5.0
-                )
+                # Wait up to 0.5 seconds for Modal. If it takes longer, fallback to local.
+                return await asyncio.wait_for(asyncio.shield(self._current_task), timeout=0.5)
+            except asyncio.TimeoutError:
+                logger.warning("Modal taking >500ms, using local MediaPipe fallback.")
+                return {"hands": []}
             except Exception as e:
-                logger.warning("Modal detect timeout or error: %s", e)
+                logger.warning("Modal detect error: %s", e)
+                self._current_task = None
                 return {"hands": []}
 
     _MODAL_AVAILABLE = True

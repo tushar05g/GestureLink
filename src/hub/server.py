@@ -193,18 +193,19 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
                             reply_target = payload.get("from") or "mobile_client"
                             
-                            pc = RTCPeerConnection(configuration={
-                                "iceServers": [
-                                    {"urls": ["stun:stun.l.google.com:19302"]},
-                                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                                    {"urls": ["stun:stun2.l.google.com:19302"]},
-                                    {
-                                        "urls": ["turn:numb.viagenie.ca"],
-                                        "username": "webrtc@example.com",
-                                        "credential": "webrtcpassword"
-                                    }
+                            from aiortc import RTCConfiguration, RTCIceServer
+                            pc = RTCPeerConnection(configuration=RTCConfiguration(
+                                iceServers=[
+                                    RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
+                                    RTCIceServer(urls=["stun:stun1.l.google.com:19302"]),
+                                    RTCIceServer(urls=["stun:stun2.l.google.com:19302"]),
+                                    RTCIceServer(
+                                        urls=["turn:numb.viagenie.ca"],
+                                        username="webrtc@example.com",
+                                        credential="webrtcpassword"
+                                    )
                                 ]
-                            })
+                            ))
                             setup_pc(pc)
                             
                             await pc.setRemoteDescription(offer)
@@ -609,10 +610,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 frame = cv2.flip(frame, 1)
                 
                 try:
-                    is_special_mode = app.state.active_mode != 0
-                    state = await loop.run_in_executor(
-                        None, vision_processor.process_frame_sync, frame, is_special_mode
-                    )
+                    is_builder_mode = app.state.active_mode == 2
+                    state = await vision_processor.process_frame(frame, is_builder_mode)
                     state.active_mode = app.state.active_mode
 
                     # --- Handle Mode Switching ---
@@ -651,26 +650,20 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             sw, sh
                         )
                     elif app.state.active_mode == 2: # BUILDER
-                        if state.gesture == Gesture.THUMB_PINCH:
+                        if state.gesture.value == "THUMB_PINCH":
                              app.state.builder.handle_thumb_pinch_drag(
-                                 state.cursor_x, state.cursor_y, 640, 480, # Base dims
+                                 state.cursor_x, state.cursor_y, sw, sh,
                                  (state.cursor_x, state.cursor_y), True
                              )
                         else:
                             app.state.builder.update(
-                                state.gesture.value, state.cursor_x, state.cursor_y, 640, 480, state
+                                state.gesture.value, state.cursor_x, state.cursor_y, sw, sh, state
                             )
                         # Overlay is updated inside builder.update() / handle_thumb_pinch_drag()
-                    elif app.state.active_mode == 0 and state.gesture != Gesture.IDLE:
+                    elif app.state.active_mode == 0:
                         mouse.update(state)
 
-                    # --- Annotate and Encode (only needed when not in a mode that has its own overlay) ---
-                    if app.state.active_mode == 0:
-                        annotated_frame = vision_processor.draw_landmarks(frame, state)
-                        def encode_frame(img):
-                            _, jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                            return jpeg.tobytes()
-                        hub_video_frame = await loop.run_in_executor(None, encode_frame, annotated_frame)
+                    # Hub GUI video feed removed per user request. No need to encode frames here.
                 except Exception as e:
                     logger.error(f"Hub loop error: {e}")
                 await asyncio.sleep(0.01)
@@ -759,20 +752,21 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
         
         # Add STUN + TURN servers for hotspot/double-NAT traversal
-        pc = RTCPeerConnection(configuration={
-            "iceServers": [
+        from aiortc import RTCConfiguration, RTCIceServer
+        pc = RTCPeerConnection(configuration=RTCConfiguration(
+            iceServers=[
                 # STUN servers (single-NAT traversal)
-                {"urls": ["stun:stun.l.google.com:19302"]},
-                {"urls": ["stun:stun1.l.google.com:19302"]},
-                {"urls": ["stun:stun2.l.google.com:19302"]},
+                RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
+                RTCIceServer(urls=["stun:stun1.l.google.com:19302"]),
+                RTCIceServer(urls=["stun:stun2.l.google.com:19302"]),
                 # TURN servers (double-NAT fallback for hotspots)
-                {
-                    "urls": ["turn:numb.viagenie.ca"],
-                    "username": "webrtc@example.com",
-                    "credential": "webrtcpassword"
-                }
+                RTCIceServer(
+                    urls=["turn:numb.viagenie.ca"],
+                    username="webrtc@example.com",
+                    credential="webrtcpassword"
+                )
             ]
-        })
+        ))
         setup_pc(pc)
 
         await pc.setRemoteDescription(offer)
@@ -844,6 +838,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         elif old_mode == 1 and new_mode != 1:
             app.state.meet_paint.stop()
             logger.info("MeetPaintController: overlay stopped via API mode switch.")
+            
+        # Manage Builder overlay lifecycle
+        if new_mode == 2 and old_mode != 2:
+            app.state.builder.start()
+            logger.info("BuilderController: overlay started via API mode switch.")
+        elif old_mode == 2 and new_mode != 2:
+            app.state.builder.stop()
+            logger.info("BuilderController: overlay stopped via API mode switch.")
+            
         return JSONResponse({"ok": True, "mode": new_mode})
 
     # --- Meet Paint Remote Control Endpoints ---
@@ -1390,21 +1393,21 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         
         if url:
             target = url
-        elif (tunnel_url or not is_local) and frontend_base:
-            # HUB is cloud/tunnel deployed or explicitly has a tunnel active
-            hub_address = tunnel_url or host
-            # Ensure we use the hostname only (strip protocols and ports)
-            hub_hostname = hub_address.replace("https://", "").replace("http://", "").split("/")[0]
-            if ":" in hub_hostname: hub_hostname = hub_hostname.split(":")[0]
-            
-            target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
-            logger.info(f"QR pointing to Vercel: {target}")
         else:
-            # HUB is running on localhost/LAN with no tunnel -> show direct IP link
-            proto = "https" if CERT_PEM.exists() else "http"
-            lan_ip = detect_lan_ip()
-            target = f"{proto}://{lan_ip}:{port}"
-            logger.info(f"QR pointing to LAN: {target}")
+            # Determine the hub address (either the Cloudflare tunnel or the local LAN IP)
+            if tunnel_url:
+                hub_address = tunnel_url
+            elif not is_local:
+                hub_address = host
+            else:
+                hub_address = detect_lan_ip() + f":{port}"
+                
+            # Clean up the hostname
+            hub_hostname = hub_address.replace("https://", "").replace("http://", "").rstrip("/")
+            
+            # Always point the QR code to the Vercel frontend
+            target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
+            logger.info(f"QR pointing to Vercel with hub {hub_hostname}: {target}")
             
         if pin:
             target += ("&" if "?" in target else "?") + f"pin={pin}"

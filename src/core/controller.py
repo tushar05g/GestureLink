@@ -167,16 +167,15 @@ class MouseController:
         return sx, sy
 
     def _handle_move(self, tx: float, ty: float) -> None:
-        self._smooth_x = self._filter_x(tx)
-        self._smooth_y = self._filter_y(ty)
+        import time
+        now = time.time()
+        self._smooth_x = self._filter_x(tx, timestamp=now)
+        self._smooth_y = self._filter_y(ty, timestamp=now)
         
-        dx = abs(self._smooth_x - tx)
-        dy = abs(self._smooth_y - ty)
-        
-        # Only move if the change is above the threshold
-        if dx > self.gc.move_threshold_px or dy > self.gc.move_threshold_px:
-            # Use direct Win32 call for zero-latency movement
-            ctypes.windll.user32.SetCursorPos(int(self._smooth_x), int(self._smooth_y))
+        # The One Euro Filter already eliminates micro-jitter. 
+        # Using a raw pixel threshold deadzone destroys slow, precise movements.
+        # We always apply the filtered position for a 1-to-1 premium feel.
+        ctypes.windll.user32.SetCursorPos(int(self._smooth_x), int(self._smooth_y))
 
     def _reset_drag(self) -> None:
         if self._drag_state == _DragState.COUNTING:

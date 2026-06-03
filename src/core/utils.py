@@ -107,18 +107,29 @@ class OneEuroFilter:
         if self.x_prev is None:
             self.x_prev = x
             self.dx_prev = 0.0
+            self.t_prev = timestamp
             return x
 
+        # If a timestamp is provided, calculate the actual dynamic frequency.
+        # This prevents jitter when frame delivery times fluctuate.
+        if timestamp is not None and getattr(self, 't_prev', None) is not None:
+            dt = timestamp - self.t_prev
+            freq = 1.0 / dt if dt > 0 else self.freq
+            self.t_prev = timestamp
+        else:
+            freq = self.freq
+            self.t_prev = timestamp
+
         # Calculate velocity
-        dx = (x - self.x_prev) * self.freq
+        dx = (x - self.x_prev) * freq
         
         # Filter velocity
-        edx = self._low_pass_filter(dx, self.dx_prev, self._alpha(self.freq, self.dcutoff))
+        edx = self._low_pass_filter(dx, self.dx_prev, self._alpha(freq, self.dcutoff))
         self.dx_prev = edx
 
         # Filter signal with adaptive cutoff based on velocity
         cutoff = self.mincutoff + self.beta * abs(edx)
-        alpha = self._alpha(self.freq, cutoff)
+        alpha = self._alpha(freq, cutoff)
         
         filtered_x = self._low_pass_filter(x, self.x_prev, alpha)
         self.x_prev = filtered_x
