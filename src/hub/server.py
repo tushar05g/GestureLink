@@ -432,6 +432,65 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         valid = tokens.validate_token(token)
         return JSONResponse({"valid": valid})
 
+    @app.post("/api/auth/verify")
+    async def verify_auth(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        token = payload.get("token")
+        if not token:
+            app.state.is_premium = False
+            return JSONResponse({"ok": True, "premium": False})
+        
+        try:
+            import base64
+            import json
+            import httpx
+            parts = token.split(".")
+            if len(parts) == 3:
+                padded_payload = parts[1] + '=' * (-len(parts[1]) % 4)
+                decoded = base64.b64decode(padded_payload)
+                user_info = json.loads(decoded)
+                uid = user_info.get("user_id")
+                
+                if uid:
+                    db_url = f"https://gesturelink-5db9c-default-rtdb.firebaseio.com/users/{uid}.json"
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(db_url)
+                        data = resp.json()
+                        if data and data.get("is_premium"):
+                            app.state.is_premium = True
+                            return JSONResponse({"ok": True, "premium": True})
+                        
+            app.state.is_premium = False
+            return JSONResponse({"ok": True, "premium": False})
+        except Exception as e:
+            logger.error(f"Auth verify error: {e}")
+            app.state.is_premium = False
+            return JSONResponse({"ok": False, "error": str(e)})
+
+    @app.post("/api/trial/start")
+    async def start_trial(payload: dict = Body(...)):
+        import time
+        mode_id = payload.get("mode_id")
+        if getattr(app.state, "is_premium", False):
+            return JSONResponse({"status": "already_premium"})
+            
+        if mode_id == 1:
+            if getattr(app.state, "trial_active_1", False):
+                return JSONResponse({"status": "already_active"})
+            app.state.trial_active_1 = True
+            app.state.trial_start_time_1 = time.time()
+            logger.info("1-minute free trial activated for Meet Paint (Mode 1).")
+            return JSONResponse({"status": "success"})
+        elif mode_id == 2:
+            if getattr(app.state, "trial_active_2", False):
+                return JSONResponse({"status": "already_active"})
+            app.state.trial_active_2 = True
+            app.state.trial_start_time_2 = time.time()
+            logger.info("1-minute free trial activated for Builder (Mode 2).")
+            return JSONResponse({"status": "success"})
+        
+        return JSONResponse({"status": "invalid_mode"})
+
+
     @app.get("/api/connected-clients")
     async def get_connected_clients() -> JSONResponse:
         return JSONResponse({"clients": list(connected_clients.values())})
@@ -597,6 +656,27 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         loop = asyncio.get_event_loop()
         try:
             while app.state.camera_active:
+                import time
+                # Check Meet Paint trial (Mode 1)
+                if getattr(app.state, "trial_active_1", False):
+                    if time.time() - getattr(app.state, "trial_start_time_1", 0) >= 60:
+                        app.state.trial_active_1 = False
+                        logger.info("Meet Paint Free trial expired!")
+                        if getattr(app.state, "active_mode", 0) == 1:
+                            app.state.active_mode = 0
+                            if hasattr(app.state, "meet_paint"):
+                                app.state.meet_paint.stop()
+                
+                # Check Builder trial (Mode 2)
+                if getattr(app.state, "trial_active_2", False):
+                    if time.time() - getattr(app.state, "trial_start_time_2", 0) >= 60:
+                        app.state.trial_active_2 = False
+                        logger.info("Builder Free trial expired!")
+                        if getattr(app.state, "active_mode", 0) == 2:
+                            app.state.active_mode = 0
+                            if hasattr(app.state, "builder"):
+                                app.state.builder.stop()
+
                 # Offload blocking I/O frame read to thread pool executor to prevent event loop lag
                 ret, frame = await loop.run_in_executor(None, cap.read)
                 if not ret:
@@ -619,18 +699,32 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     # --- Handle Mode Switching ---
                     if state.mode_switch:
                         old_mode = app.state.active_mode
-                        app.state.active_mode = (app.state.active_mode + 1) % 3
-                        logger.info(f"Mode switched! Active: {app.state.active_mode}")
-                        # Meet Paint overlay lifecycle
-                        if app.state.active_mode == 1:
-                            app.state.meet_paint.start()
-                        elif old_mode == 1:
-                            app.state.meet_paint.stop()
-                        # Builder overlay lifecycle
-                        if app.state.active_mode == 2:
-                            app.state.builder.start()
-                        elif old_mode == 2:
-                            app.state.builder.stop()
+                        next_mode = (app.state.active_mode + 1) % 3
+                        
+                        is_prem = getattr(app.state, "is_premium", False)
+                        allowed = False
+                        if next_mode == 1 and (is_prem or getattr(app.state, "trial_active_1", False)):
+                            allowed = True
+                        elif next_mode == 2 and (is_prem or getattr(app.state, "trial_active_2", False)):
+                            allowed = True
+                        elif next_mode == 0:
+                            allowed = True
+                            
+                        if not allowed:
+                            logger.warning("Blocked mode switch: Premium required for Meet Paint and Builder Mode.")
+                        else:
+                            app.state.active_mode = next_mode
+                            logger.info(f"Mode switched! Active: {app.state.active_mode}")
+                            # Meet Paint overlay lifecycle
+                            if app.state.active_mode == 1:
+                                app.state.meet_paint.start()
+                            elif old_mode == 1:
+                                app.state.meet_paint.stop()
+                            # Builder overlay lifecycle
+                            if app.state.active_mode == 2:
+                                app.state.builder.start()
+                            elif old_mode == 2:
+                                app.state.builder.stop()
 
                     # --- Mode Logic ---
                     if app.state.active_mode == 1: # MEET PAINT
