@@ -113,6 +113,45 @@ def build_mobile():
     success(f"Mobile frontend built -> {dist_dir}")
 
 
+# ─── Step 2.5: Android APK build ──────────────────────────────────────────────
+def build_android():
+    mobile_dir = ROOT / "src" / "web" / "mobile"
+    android_dir = mobile_dir / "android"
+    apk_output = android_dir / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
+    release_dir = ROOT / "release"
+
+    log("Building Android APK (Capacitor + Gradle)...")
+
+    if not android_dir.exists():
+        warn("No 'android' folder found in src/web/mobile — skipping Android APK build.")
+        return
+
+    use_shell = (os.name == "nt")
+    try:
+        log("  Running 'npx cap sync android'...")
+        subprocess.run(
+            ["npx", "cap", "sync", "android"],
+            cwd=str(mobile_dir), check=True, shell=use_shell
+        )
+
+        log("  Running Gradle assembleDebug...")
+        gradle_cmd = "gradlew.bat" if os.name == "nt" else "./gradlew"
+        subprocess.run(
+            [gradle_cmd, "assembleDebug"],
+            cwd=str(android_dir), check=True, shell=use_shell
+        )
+
+        if apk_output.exists():
+            release_dir.mkdir(exist_ok=True)
+            dest = release_dir / "GestureLink_Mobile.apk"
+            shutil.copy2(apk_output, dest)
+            success(f"Android APK built and copied to: {dest}")
+        else:
+            warn("APK was not found after build.")
+    except subprocess.CalledProcessError as e:
+        warn(f"Android build failed: {e}")
+
+
 # ─── Step 3: Convert logo.png → logo.ico ──────────────────────────────────────
 def convert_icon():
     logo_png = ROOT / "logo.png"
@@ -241,6 +280,7 @@ def main():
 
     if has_npm:
         build_mobile()
+        build_android()
 
     convert_icon()
 

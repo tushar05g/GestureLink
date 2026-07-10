@@ -1,26 +1,27 @@
 """
-modal_vision.py — Modal cloud deployment for MediaPipe hand tracking.
+modal_vision.py — Modal cloud deployment for MediaPipe hand tracking via Web API.
 
 Architecture
 ------------
 Local machine:
   - Captures webcam frames
-  - Sends compressed JPEG to Modal worker
+  - Sends compressed JPEG via standard HTTP POST to Modal Web API
   - Receives landmark JSON back (~1KB vs ~100KB frame)
-  - Runs OpenGL rendering + mouse control locally
+  - No `modal` package or CLI login required!
 
 Modal worker (GPU/CPU):
+  - Exposes a secure FastAPI endpoint (@modal.asgi_app)
   - Runs MediaPipe HandLandmarker
   - Returns 21 landmarks per hand as JSON
-  - Much faster than local CPU inference
 
 Usage
 -----
-  # Deploy once:
-  modal deploy src/modal_vision.py
+  # Deploy once (Developer Only):
+  modal deploy src/core/modal_vision.py
 
-  # Use in vision.py:
+  # Use in vision.py (End User):
   Set USE_MODAL=true in .env
+  Set MODAL_API_URL=https://... in .env
 """
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ import os
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Modal app definition
+# Modal app definition (Ignored for End Users)
 # ---------------------------------------------------------------------------
 try:
     import modal
@@ -42,6 +43,7 @@ try:
             "mediapipe>=0.10.14",
             "numpy",
             "opencv-python-headless",
+            "fastapi"
         )
         .run_commands("apt-get update && apt-get install -y libgl1-mesa-glx")
     )
@@ -75,12 +77,8 @@ try:
             self._mp_image_cls = mp.Image
             self._mp_format    = mp.ImageFormat.SRGB
 
-        @modal.method()
-        def detect(self, jpeg_bytes: bytes) -> dict:
-            """
-            Detect hand landmarks from a JPEG frame.
-            Returns dict with landmark data for up to 2 hands.
-            """
+        def _detect_logic(self, jpeg_bytes: bytes) -> dict:
+            """Core MediaPipe logic"""
             import cv2
             import numpy as np
 
@@ -106,62 +104,84 @@ try:
 
             return {"hands": hands_data}
 
-    # ---------------------------------------------------------------------------
-    # Local client proxy
-    # ---------------------------------------------------------------------------
-
-    class ModalVisionClient:
-        """
-        Wraps the Modal remote VisionWorker.
-        Mimics the interface of local MediaPipe detection.
-        """
-        def __init__(self):
-            import modal.config
-            token_id = os.environ.get("MODAL_TOKEN_ID")
-            token_secret = os.environ.get("MODAL_TOKEN_SECRET")
-            if token_id and token_secret:
-                modal.config.config.override_locally("token_id", token_id)
-                modal.config.config.override_locally("token_secret", token_secret)
+        @modal.asgi_app()
+        def web_api(self):
+            import fastapi
+            
+            web_app = fastapi.FastAPI()
+            
+            @web_app.post("/detect")
+            async def detect_endpoint(request: fastapi.Request):
+                # Verify API Key
+                api_key = request.headers.get("X-API-Key")
+                if api_key != "gesturelink_vision_api_secret_key":
+                    return fastapi.Response(status_code=403, content="Invalid API Key")
                 
-            self._worker = modal.Cls.from_name(
-                "gesture-control-vision", "VisionWorker"
-            )()
-            logger.info("ModalVisionClient connected.")
-
-        async def detect(self, frame_bgr) -> dict:
-            import cv2
-            import asyncio
-            
-            if hasattr(self, '_current_task') and self._current_task is not None:
-                if not self._current_task.done():
-                    # Modal is still processing a previous frame. Fallback instantly.
-                    return {"hands": []}
-                else:
-                    self._current_task = None
-
-            _, buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            
-            self._current_task = asyncio.create_task(
-                asyncio.to_thread(self._worker.detect.remote, buf.tobytes())
-            )
-            
-            try:
-                # Wait up to 0.5 seconds for Modal. If it takes longer, fallback to local.
-                return await asyncio.wait_for(asyncio.shield(self._current_task), timeout=0.5)
-            except asyncio.TimeoutError:
-                logger.warning("Modal taking >500ms, using local MediaPipe fallback.")
-                return {"hands": []}
-            except Exception as e:
-                logger.warning("Modal detect error: %s", e)
-                self._current_task = None
-                return {"hands": []}
-
-    _MODAL_AVAILABLE = True
+                body = await request.body()
+                return self._detect_logic(body)
+                
+            return web_app
 
 except ImportError:
-    _MODAL_AVAILABLE = False
-    logger.info("Modal not installed — using local MediaPipe.")
+    logger.info("Modal backend package not installed — this is normal for End Users.")
 
+
+# ---------------------------------------------------------------------------
+# Local client proxy (Runs on End User's Machine)
+# ---------------------------------------------------------------------------
+
+class ModalVisionClient:
+    """
+    Wraps the remote Web API.
+    Uses standard httpx so it works flawlessly on any end-user machine without Modal login.
+    """
+    def __init__(self):
+        import httpx
+        self.api_url = os.environ.get("MODAL_API_URL")
+        if not self.api_url:
+            raise ValueError("MODAL_API_URL not set in .env")
+            
+        # Ensure we hit the correct /detect endpoint
+        self.api_url = self.api_url.rstrip("/") + "/detect"
+        self.api_key = os.environ.get("MODAL_API_KEY", "gesturelink_vision_api_secret_key")
+        
+        # Async HTTP client
+        self.client = httpx.AsyncClient()
+        self._busy = False
+        logger.info(f"ModalVisionClient connected to Web API: {self.api_url}")
+
+    async def detect(self, frame_bgr) -> dict:
+        import cv2
+        import asyncio
+        
+        if self._busy:
+            # Fallback if we are already waiting for a previous frame
+            return {"hands": []}
+            
+        self._busy = True
+        try:
+            _, buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            
+            res = await self.client.post(
+                self.api_url, 
+                content=buf.tobytes(),
+                headers={"X-API-Key": self.api_key},
+                timeout=0.5
+            )
+            if res.status_code == 200:
+                return res.json()
+            else:
+                logger.warning(f"Modal API Error: {res.status_code}")
+                return {"hands": []}
+                
+        except asyncio.TimeoutError:
+            logger.warning("Modal taking >500ms, using local MediaPipe fallback.")
+            return {"hands": []}
+        except Exception as e:
+            logger.warning(f"Modal detect error: {e}")
+            return {"hands": []}
+        finally:
+            self._busy = False
 
 # ---------------------------------------------------------------------------
 # Factory — returns Modal client or None
@@ -169,18 +189,15 @@ except ImportError:
 
 def get_modal_client():
     """
-    Returns a ModalVisionClient if Modal is configured, else None.
-    Set USE_MODAL=true in your .env to enable.
+    Returns a ModalVisionClient if enabled in .env, else None.
     """
     use_modal = os.environ.get("USE_MODAL", "false").lower() == "true"
     if not use_modal:
         return None
-    if not _MODAL_AVAILABLE:
-        logger.warning("USE_MODAL=true but modal package not installed.")
-        return None
+        
     try:
         client = ModalVisionClient()
         return client
     except Exception as e:
-        logger.warning("Modal connection failed (%s) — falling back to local.", e)
+        logger.warning(f"Modal configuration failed ({e}) — falling back to local MediaPipe.")
         return None

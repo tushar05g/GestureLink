@@ -235,15 +235,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             
             FIREBASE_URL = "https://gesturelink-5db9c-default-rtdb.firebaseio.com"
             logger.info("Firebase Signaling active. Waiting for mobile peer...")
-            
-            while True:
-                pin = tokens.current_pin
-                if not pin:
-                    await asyncio.sleep(1)
-                    continue
-                    
-                try:
-                    async with httpx.AsyncClient() as client:
+            # Create client ONCE to reuse connection pool and avoid TLS handshake blocking the event loop
+            async with httpx.AsyncClient() as client:
+                while True:
+                    pin = tokens.current_pin
+                    if not pin or getattr(app.state, "firebase_answered_pin", None) == pin:
+                        # If we already connected for this PIN, or no PIN, just sleep (don't poll Firebase)
+                        await asyncio.sleep(2)
+                        continue
+                        
+                    try:
                         # Poll the mobile offer
                         res = await client.get(f"{FIREBASE_URL}/sessions/{pin}/mobile.json")
                         data = res.json()
@@ -292,10 +293,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                                 # but aiortc handles them via SDP or addIceCandidate.
                                 pass
                                 
-                except Exception as e:
-                    pass
-                
-                await asyncio.sleep(1.5)
+                    except Exception as e:
+                        pass
+                    
+                    await asyncio.sleep(1.5)
 
         app.state.firebase_task = asyncio.create_task(_firebase_signaling_loop())
 
@@ -1366,8 +1367,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     @app.get("/lan-qr.png")
     async def qr_gen(request: Request, url: Optional[str] = None, pin: Optional[str] = None) -> StreamingResponse:
-        frontend_base = os.getenv("FRONTEND_URL") or "https://gesture-link-iota.vercel.app"
+        frontend_base = os.getenv("FRONTEND_URL") or "https://app.thequinn.tech"
         
+
         # Use X-Forwarded-Host if behind a tunnel (Cloudflare, ngrok)
         host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
         # Remove port if present for hostname check
@@ -1420,6 +1422,21 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             qr.save(buf, format="PNG")
         except TypeError:
             # Handle pure-python qrcode implementation which doesn't take 'format'
+            qr.save(buf)
+        buf.seek(0)
+        return StreamingResponse(buf, media_type="image/png")
+
+    @app.get("/download-qr.png")
+    async def download_qr_gen() -> StreamingResponse:
+        frontend_base = os.getenv("FRONTEND_URL") or "https://gesture-link-iota.vercel.app"
+        target = f"{frontend_base.rstrip('/')}/download"
+        
+        logger.info(f"Download QR Target: {target}")
+        qr = qrcode.make(target)
+        buf = io.BytesIO()
+        try:
+            qr.save(buf, format="PNG")
+        except TypeError:
             qr.save(buf)
         buf.seek(0)
         return StreamingResponse(buf, media_type="image/png")
