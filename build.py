@@ -59,7 +59,7 @@ def check_prerequisites():
     except (subprocess.CalledProcessError, FileNotFoundError):
         error(
             "PyInstaller not found. Install it with:\n"
-            "  venv\\Scripts\\pip install pyinstaller"
+            "  .venv\\Scripts\\pip install pyinstaller"
         )
 
     # Node / npm (for mobile build)

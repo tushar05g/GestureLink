@@ -458,6 +458,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         if data and data.get("is_premium"):
                             app.state.is_premium = True
                             return JSONResponse({"ok": True, "premium": True})
+                
+                # If not premium by UID, check if their email was upgraded via Stripe
+                email = user_info.get("email")
+                if email:
+                    safe_email = base64.b64encode(email.encode('utf-8')).decode('utf-8')
+                    email_url = f"https://gesturelink-5db9c-default-rtdb.firebaseio.com/premium_users/{safe_email}.json"
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(email_url)
+                        data = resp.json()
+                        if data and data.get("isPremium"):
+                            app.state.is_premium = True
+                            return JSONResponse({"ok": True, "premium": True})
                         
             app.state.is_premium = False
             return JSONResponse({"ok": True, "premium": False})
