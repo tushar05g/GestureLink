@@ -159,8 +159,25 @@ class GestureLinkTray:
 
     def on_open_hub(self):
         from src.core.utils import resource_path
+        import subprocess
+        import sys
+        
         proto = "https" if resource_path("cert.pem").exists() else "http"
-        webbrowser.open(f"{proto}://localhost:{self.port}/hub")
+        url = f"{proto}://localhost:{self.port}/hub"
+        
+        # Launch pywebview in a separate background process
+        try:
+            if hasattr(sys, 'frozen'):
+                # Running as compiled PyInstaller executable
+                subprocess.Popen([sys.executable, "--webview", url])
+            else:
+                # Running as Python script
+                script_path = __file__
+                subprocess.Popen([sys.executable, script_path, "--webview", url])
+        except Exception as e:
+            print("Failed to launch webview:", e)
+            import webbrowser
+            webbrowser.open(url)
 
     def on_copy_ip(self):
         from src.hub.managers import detect_lan_ip
@@ -181,6 +198,25 @@ class GestureLinkTray:
             pass
         if self.icon:
             self.icon.stop()
+
+        # Force-kill this process and any other stray GestureLink_Hub instances
+        # using taskkill so the .exe file lock is always fully released.
+        import subprocess
+        try:
+            current_pid = os.getpid()
+            # Kill any other instances first
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "GestureLink_Hub.exe"],
+                capture_output=True
+            )
+            # Then kill ourselves (belt-and-suspenders after taskkill)
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(current_pid)],
+                capture_output=True
+            )
+        except Exception:
+            pass
+
         os._exit(0)
 
     def run_server(self):
@@ -235,5 +271,42 @@ class GestureLinkTray:
         self.icon.run()
 
 if __name__ == "__main__":
+    import sys
+    # Intercept webview launch argument
+    if "--webview" in sys.argv:
+        try:
+            url_idx = sys.argv.index("--webview") + 1
+            url = sys.argv[url_idx]
+            
+            import webview
+            
+            # Try to resolve an icon if we are running locally or built
+            import os
+            icon_path = None
+            possible_icons = [
+                "src/hub/static/icon.ico",
+                "icon.ico", 
+                "../src/hub/static/icon.ico"
+            ]
+            for p in possible_icons:
+                if os.path.exists(p):
+                    icon_path = p
+                    break
+                    
+            window = webview.create_window(
+                'GestureLink Hub', 
+                url,
+                width=1100,
+                height=750,
+                min_size=(800, 600),
+                background_color='#0f172a' # Match our dark theme
+            )
+            webview.start(private_mode=False)
+            sys.exit(0)
+        except Exception as e:
+            print("Error launching webview:", e)
+            sys.exit(1)
+            
+    # Otherwise, run normal tray
     tray = GestureLinkTray()
     tray.run()

@@ -7,17 +7,17 @@
   <title>GestureLink Controller</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#03070c">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.2/css/all.min.css">
+  
   <style>
     :root {
-      --bg: #03070c;
-      --bg-elevated: #070d14;
-      --surface: rgba(255, 255, 255, 0.04);
-      --surface-hover: rgba(255, 255, 255, 0.08);
-      --surface-active: rgba(255, 255, 255, 0.12);
+      --bg: #000000;
+      --bg-elevated: #050505;
+      --surface: rgba(0, 255, 149, 0.04);
+      --surface-hover: rgba(0, 255, 149, 0.08);
+      --surface-active: rgba(0, 255, 149, 0.12);
       --accent: #00ff95;
       --accent-dim: #00cc78;
       --accent-glow: rgba(0, 255, 149, 0.3);
@@ -30,10 +30,10 @@
       --glass: rgba(255, 255, 255, 0.025);
       --danger: #ff3b5c;
       --danger-glow: rgba(255, 59, 92, 0.2);
-      --radius-sm: 10px;
-      --radius-md: 16px;
-      --radius-lg: 22px;
-      --radius-xl: 28px;
+      --radius-sm: 2px;
+      --radius-md: 4px;
+      --radius-lg: 4px;
+      --radius-xl: 8px;
       --nav-height: 76px;
       --header-height: 60px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -54,8 +54,10 @@
       overflow: hidden;
     }
 
+    }
+
     body {
-      font-family: 'Outfit', sans-serif;
+      font-family: 'Fira Code', monospace;
       background: var(--bg);
       color: var(--text-primary);
       user-select: none;
@@ -67,9 +69,10 @@
       content: '';
       position: fixed;
       inset: 0;
-      background:
-        radial-gradient(ellipse 80% 40% at 50% 0%, rgba(0, 255, 149, 0.04) 0%, transparent 70%),
-        radial-gradient(ellipse 60% 30% at 80% 80%, rgba(0, 180, 255, 0.02) 0%, transparent 60%);
+      background-image: 
+        linear-gradient(rgba(0, 255, 149, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 149, 0.03) 1px, transparent 1px);
+      background-size: 20px 20px;
       pointer-events: none;
       z-index: 0;
     }
@@ -376,10 +379,8 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--border);
-      background: rgba(3, 7, 12, 0.85);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-accent);
+      background: #000;
       flex-shrink: 0;
       position: relative;
       z-index: 10;
@@ -514,8 +515,8 @@
        CARDS
     ================================ */
     .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: #000;
+      border: 1px solid rgba(0, 255, 149, 0.2);
       border-radius: var(--radius-lg);
       padding: 18px;
       margin-bottom: 12px;
@@ -536,7 +537,7 @@
     .card-title {
       font-size: 0.75rem;
       font-weight: 700;
-      color: var(--text-secondary);
+      color: var(--accent);
       text-transform: uppercase;
       letter-spacing: 0.09em;
       margin-bottom: 14px;

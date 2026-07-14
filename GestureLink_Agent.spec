@@ -76,7 +76,12 @@ hidden_imports = [
     "src.core.modal_vision",
     "psutil",
     "zeroconf._utils.ipaddress",
-    "zeroconf._handlers.answers"
+    "zeroconf._handlers.answers",
+    "webview",
+    "aiortc",
+    "httpx",
+    "src.agent.pairing_ui",
+    "src.agent.cloud_link"
 ]
 
 datas = [

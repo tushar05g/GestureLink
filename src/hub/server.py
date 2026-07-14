@@ -619,6 +619,86 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         except Exception as e:
             return JSONResponse({"ok": False, "error": f"Could not reach Agent at {ip}:8001 — {e}"})
 
+    @app.post("/api/agent/connect-cloud")
+    async def connect_cloud_agent(payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return JSONResponse({"ok": False, "error": "No agent ID"}, status_code=400)
+            
+        uid = tokens.firebase_uid
+        if not uid:
+            return JSONResponse({"ok": False, "error": "Not logged in to Cloud"}, status_code=401)
+            
+        from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
+        pc = RTCPeerConnection(configuration=RTCConfiguration(
+            iceServers=[
+                RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
+                RTCIceServer(urls=["stun:stun1.l.google.com:19302"])
+            ]
+        ))
+        setup_pc(pc)
+        
+        # Create DataChannel for gestures
+        channel = pc.createDataChannel("gestures")
+        app.state.cloud_agent_channel = channel # Save for vision_worker to use!
+        
+        @channel.on("open")
+        def on_open():
+            logger.info(f"Cloud DataChannel {channel.label} opened to Agent {agent_id}")
+            # Switch target to cloud so Hub UI updates
+            app.state.target_agent = f"cloud:{agent_id}"
+
+        @channel.on("close")
+        def on_close():
+            logger.info("Cloud DataChannel closed")
+            if getattr(app.state, "target_agent", "").startswith("cloud:"):
+                app.state.target_agent = None
+                app.state.cloud_agent_channel = None
+
+        offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        
+        offer_data = {
+            "sdp": pc.localDescription.sdp,
+            "type": pc.localDescription.type
+        }
+        
+        # Put offer into Firebase
+        import urllib.request
+        import json
+        FIREBASE_URL = "https://gesturelink-5db9c-default-rtdb.firebaseio.com"
+        try:
+            req = urllib.request.Request(
+                f"{FIREBASE_URL}/users/{uid}/agents/{agent_id}/signaling/hub_offer.json",
+                data=json.dumps(offer_data).encode('utf-8'),
+                method='PUT'
+            )
+            with urllib.request.urlopen(req, timeout=5) as res:
+                pass
+                
+            # Wait for answer
+            import httpx
+            import asyncio
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                # Poll for answer
+                for _ in range(15):
+                    resp = await client.get(f"{FIREBASE_URL}/users/{uid}/agents/{agent_id}/signaling/agent_answer.json")
+                    ans_data = resp.json()
+                    if ans_data:
+                        # Clear answer
+                        try:
+                            await client.delete(f"{FIREBASE_URL}/users/{uid}/agents/{agent_id}/signaling/agent_answer.json")
+                        except: pass
+                        
+                        answer = RTCSessionDescription(sdp=ans_data["sdp"], type=ans_data["type"])
+                        await pc.setRemoteDescription(answer)
+                        return JSONResponse({"ok": True})
+                    await asyncio.sleep(1)
+            
+            return JSONResponse({"ok": False, "error": "Agent did not answer"})
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)})
+
     async def _hub_camera_loop():
         global hub_video_frame, hub_camera_active
         import cv2
@@ -757,7 +837,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             )
                         # Overlay is updated inside builder.update() / handle_thumb_pinch_drag()
                     elif app.state.active_mode == 0:
-                        mouse.update(state)
+                        dispatch_mouse(state, mouse)
 
                     # Hub GUI video feed removed per user request. No need to encode frames here.
                 except Exception as e:
@@ -1027,6 +1107,28 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             "ssl_active": CERT_PEM.exists(),
             "pin": tokens.current_pin
         }
+
+    @app.post("/api/hub/shutdown")
+    async def hub_shutdown():
+        """Called by hub.html when the browser window/tab is closed (sendBeacon).
+        Triggers a full force-kill so no ghost processes remain."""
+        import subprocess, threading
+        logger.info("Shutdown requested via browser close.")
+
+        def _kill():
+            import time, os
+            time.sleep(0.3)  # brief delay so HTTP response can be sent first
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "GestureLink_Hub.exe"],
+                    capture_output=True
+                )
+            except Exception:
+                pass
+            os._exit(0)
+
+        threading.Thread(target=_kill, daemon=True).start()
+        return JSONResponse({"status": "shutting_down"})
 
     @app.get("/api/apps")
     async def get_apps(ip: Optional[str] = None) -> JSONResponse:
@@ -1367,18 +1469,47 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         pass
                 asyncio.create_task(check_shutdown())
 
+    def dispatch_mouse(state, mouse):
+        import json
+        cloud_ch = getattr(app.state, "cloud_agent_channel", None)
+        if cloud_ch and cloud_ch.readyState == "open":
+            try:
+                cloud_ch.send(json.dumps({
+                    "type": "raw_state",
+                    "gesture": state.gesture.value,
+                    "cursor_x": state.cursor_x,
+                    "cursor_y": state.cursor_y,
+                    "scroll_dy": state.scroll_dy,
+                    "pinch_active": state.pinch_active,
+                    "thumb_pinch_active": state.thumb_pinch_active,
+                    "mode_switch": state.mode_switch,
+                    "active_mode": state.active_mode
+                }))
+                return "SENT_TO_CLOUD"
+            except Exception as e:
+                logger.error(f"Failed to send to cloud agent: {e}")
+        return mouse.update(state)
+
     async def _handle_vision_frame(responder, frame_bytes, vision, mouse):
         # AsyncVisionWorker handles the queue and process management
         result = await vision.process_frame(frame_bytes)
         if result:
             state, _ = result
             if state:
-                status = mouse.update(state)
+                status = dispatch_mouse(state, mouse)
                 try:
                     await responder.send_json({"status": status, "type": "gesture"})
                 except: pass
 
     async def _handle_ws_message(responder, msg, vision, mouse):
+        cloud_ch = getattr(app.state, "cloud_agent_channel", None)
+        if cloud_ch and cloud_ch.readyState == "open":
+            try:
+                cloud_ch.send(msg["text"])
+                if responder: await responder.send_json({"status": "SENT_TO_CLOUD"})
+            except: pass
+            return
+            
         try:
             data = json.loads(msg["text"])
             mtype = data.get("type")

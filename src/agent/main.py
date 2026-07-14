@@ -293,7 +293,16 @@ async def startup():
         except Exception as e:
             logging.warning(f"Zeroconf failed: {e}")
 
-    asyncio.get_event_loop().run_in_executor(None, register)
+    # Launch zeroconf in a separate thread so startup isn't blocked
+    import threading
+    threading.Thread(target=register, daemon=True).start()
+
+    # Start Cloud Listener (WebRTC)
+    from src.agent.cloud_link import cloud_listener_loop
+    global mouse
+    if mouse is None:
+        mouse = MouseController(CONFIG, responsive=True)
+    asyncio.create_task(cloud_listener_loop(mouse))
 
 @app.on_event("shutdown")
 async def shutdown():

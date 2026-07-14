@@ -146,6 +146,7 @@ class AgentTray:
 
         menu = (
             item('GestureLink Agent (Online)', lambda: None, enabled=False),
+            item('Link Cloud Account...', self.open_cloud_link),
             item('Exit Agent', self.on_quit),
         )
         
@@ -155,7 +156,22 @@ class AgentTray:
             "GestureLink Agent",
             menu
         )
+        
+        # Check if already linked, if not open UI
+        from src.agent.pairing_ui import load_agent_config
+        config = load_agent_config()
+        if not config.get("uid"):
+            # open slightly delayed so tray has time to start
+            threading.Timer(1.0, self.open_cloud_link).start()
+            
         self.icon.run()
+
+    def open_cloud_link(self):
+        from src.agent.pairing_ui import start_pairing_ui
+        import multiprocessing
+        # pywebview needs main thread or a separate process. Since tray takes main thread,
+        # we launch pairing UI as a background process.
+        multiprocessing.Process(target=start_pairing_ui, daemon=True).start()
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
