@@ -1645,9 +1645,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             # Clean up the hostname
             hub_hostname = hub_address.replace("https://", "").replace("http://", "").rstrip("/")
             
-            # Always point the QR code to the Vercel frontend
-            target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
-            logger.info(f"QR pointing to Vercel with hub {hub_hostname}: {target}")
+            # If it's a local IP, point the QR code directly to the Hub's local server
+            # to avoid HTTPS -> HTTP Mixed Content blocks from app.thequinn.tech
+            if is_local and not tunnel_url:
+                target = f"http://{hub_hostname}"
+            else:
+                target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
+                
+            logger.info(f"QR pointing to: {target}")
             
         if pin:
             target += ("&" if "?" in target else "?") + f"pin={pin}"

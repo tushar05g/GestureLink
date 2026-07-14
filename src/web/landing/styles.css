@@ -1,3 +1,4 @@
+html { scroll-behavior: smooth; }
 /* Global Styles & Variables */
 :root {
     --bg-color: #03070c;
