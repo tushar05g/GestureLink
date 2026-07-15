@@ -1074,11 +1074,15 @@ async function autoPair(pin: string) {
   const baseUrl = hubUrl.startsWith('http') ? hubUrl : `https://${hubUrl}`;
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/pair`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin, hostname: "Mobile Controller" })
+      body: JSON.stringify({ pin, hostname: "Mobile Controller" }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     const data = await res.json();
 
     if (data.status === "approved" && data.token) {
