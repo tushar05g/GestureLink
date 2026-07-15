@@ -1555,7 +1555,7 @@
       margin-top: 4px;
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-Duj6HCGj.js"></script>
+  <script type="module" crossorigin src="/assets/index-CX1PGCtD.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-B0ulEir5.css">
 </head>
 
@@ -1637,7 +1637,6 @@
       <div class="scanner-footer" id="scannerFooter">
         <div class="scanner-divider">or</div>
         <button class="btn-ghost-sm" id="scanManualBtn"><i class="fas fa-keyboard"></i> Enter IP manually</button>
-        <button class="btn-ghost-sm" id="scanQrBtn"><i class="fas fa-qrcode"></i> Connect via QR Code</button>
       </div>
     </div>
 
@@ -1651,12 +1650,9 @@
         <div class="logo-pulse">G</div>
       </div>
 
-      <h2>Enter Pairing PIN</h2>
-      <p>Type the 6-digit PIN shown on your PC screen.</p>
-
-      <div id="pairStatusText"></div>
-      <p id="pairError"><i class="fas fa-exclamation-triangle"></i> Connection Failed</p>
-      <button id="pairBtn" class="btn btn-primary" style="margin-top: 24px; max-width: 320px;"><i class="fas fa-wifi"></i> Scan Local Network</button>
+      <div id="pairStatusText" style="margin-top: 32px; font-size: 1.1rem; font-weight: 600; color: #fff;"></div>
+      <p id="pairError" style="display:none;"><i class="fas fa-exclamation-triangle"></i> Connection Failed</p>
+      <button id="pairBtn" class="btn btn-primary" style="margin-top: 24px; max-width: 320px; display:none;"><i class="fas fa-wifi"></i> Scan Local Network</button>
     </div>
 
     <!-- ============================
