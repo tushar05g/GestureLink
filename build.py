@@ -143,7 +143,7 @@ def build_android():
 
         if apk_output.exists():
             release_dir.mkdir(exist_ok=True)
-            dest = release_dir / "GestureLink_Mobile.apk"
+            dest = release_dir / "GestureLink_mobile_v1.0.0.apk"
             shutil.copy2(apk_output, dest)
             success(f"Android APK built and copied to: {dest}")
         else:
