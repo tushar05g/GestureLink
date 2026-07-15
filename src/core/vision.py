@@ -51,8 +51,7 @@ _MODEL_URL = (
 
 # Use resource_path so the model is found correctly inside a PyInstaller bundle
 _MODEL_PATH = resource_path("src/core/models/hand_landmarker.task")
-_MODEL_DIR  = _MODEL_PATH.parent
-
+_MODEL_DIR = _MODEL_PATH.parent
 
 
 def _ensure_model() -> str:
@@ -69,22 +68,22 @@ def _ensure_model() -> str:
 # Gesture enum
 # ---------------------------------------------------------------------------
 class Gesture(str, Enum):
-    IDLE          = "IDLE"
+    IDLE = "IDLE"
     # --- Cursor mode (Restored Index-based) ---
-    INDEX_MOVE    = "INDEX_MOVE"    # index only → move cursor
-    LEFT_CLICK    = "LEFT_CLICK"    # index + middle → left click/drag
-    RIGHT_CLICK   = "RIGHT_CLICK"   # rock sign → right click
+    INDEX_MOVE = "INDEX_MOVE"    # index only → move cursor
+    LEFT_CLICK = "LEFT_CLICK"    # index + middle → left click/drag
+    RIGHT_CLICK = "RIGHT_CLICK"   # rock sign → right click
     # Shared / Builder
-    POINTING      = "POINTING"      # index only → ghost preview
-    PINCH         = "PINCH"         # index+middle → paint
-    THUMB_PINCH   = "THUMB_PINCH"   # thumb + index touch → move cube
-    SCROLL        = "SCROLL"        # 3 fingertips
-    MODE_SWITCH   = "MODE_SWITCH"   # pinky hold
+    POINTING = "POINTING"      # index only → ghost preview
+    PINCH = "PINCH"         # index+middle → paint
+    THUMB_PINCH = "THUMB_PINCH"   # thumb + index touch → move cube
+    SCROLL = "SCROLL"        # 3 fingertips
+    MODE_SWITCH = "MODE_SWITCH"   # pinky hold
     # --- Legacy aliases (kept for controller compatibility) ---
-    ONE_FINGER    = "ONE_FINGER"
-    TWO_FINGERS   = "TWO_FINGERS"
+    ONE_FINGER = "ONE_FINGER"
+    TWO_FINGERS = "TWO_FINGERS"
     THREE_FINGERS = "THREE_FINGERS"
-    FOUR_FINGERS  = "FOUR_FINGERS"
+    FOUR_FINGERS = "FOUR_FINGERS"
 
 
 # ---------------------------------------------------------------------------
@@ -94,21 +93,22 @@ class Gesture(str, Enum):
 class GestureState:
     # Primary (right) hand
     gesture:            Gesture = Gesture.IDLE
-    cursor_x:           float   = 0.5
-    cursor_y:           float   = 0.5
-    scroll_dy:          float   = 0.0
-    pinch_active:       bool    = False   # index+middle (paint)
-    thumb_pinch_active: bool    = False   # thumb+index (move)
-    mode_switch:        bool    = False
+    cursor_x:           float = 0.5
+    cursor_y:           float = 0.5
+    scroll_dy:          float = 0.0
+    pinch_active:       bool = False   # index+middle (paint)
+    thumb_pinch_active: bool = False   # thumb+index (move)
+    mode_switch:        bool = False
     # Mode info: 0=Cursor, 1=Canvas, 2=Builder
-    active_mode:        int     = 0
+    active_mode:        int = 0
     # For Canvas Mode rendering
-    canvas_paths:       list    = field(default_factory=list)
+    canvas_paths:       list = field(default_factory=list)
 
     # Two-hand state (Builder only)
-    left_fist:          bool    = False   # left hand making fist
+    left_fist:          bool = False   # left hand making fist
     right_thumb_index_dist: float = 0.2  # normalised dist for zoom
-    right_index_pos:    tuple[float,float] = field(default_factory=lambda: (0.5, 0.5))
+    right_index_pos:    tuple[float, float] = field(
+        default_factory=lambda: (0.5, 0.5))
     finger_count:       int = 0
     landmarks:          list[dict[str, float]] | None = None
 
@@ -138,7 +138,9 @@ def _is_fist(lm, threshold: float = 0.06) -> bool:
     palm_y = (lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 4
 
     class _P:
-        def __init__(self, x, y): self.x = x; self.y = y
+        def __init__(self, x, y):
+            self.x = x
+            self.y = y
 
     palm = _P(palm_x, palm_y)
     tips = [lm[8], lm[12], lm[16], lm[20]]
@@ -156,12 +158,12 @@ class GestureClassifier:
 
     def classify_cursor(self, lm) -> tuple[Gesture, float, float]:
         """Classify gestures for Cursor (Productivity) mode — Index Based."""
-        gc = self.gc
+        self.gc
 
-        index_ext  = _finger_extended(lm, 8,  6)
+        index_ext = _finger_extended(lm, 8,  6)
         middle_ext = _finger_extended(lm, 12, 10)
-        ring_ext   = _finger_extended(lm, 16, 14)
-        pinky_ext  = _finger_extended(lm, 20, 18)
+        ring_ext = _finger_extended(lm, 16, 14)
+        pinky_ext = _finger_extended(lm, 20, 18)
 
         # Index tip position as cursor anchor
         cx, cy = lm[8].x, lm[8].y
@@ -171,9 +173,9 @@ class GestureClassifier:
             return Gesture.RIGHT_CLICK, cx, cy
 
         # Priority 2: Scroll — 3 fingertips raised
-        index_tip_up  = _fingertip_raised(lm, 8,  5)
+        index_tip_up = _fingertip_raised(lm, 8,  5)
         middle_tip_up = _fingertip_raised(lm, 12, 9)
-        ring_tip_up   = _fingertip_raised(lm, 16, 13)
+        ring_tip_up = _fingertip_raised(lm, 16, 13)
         if index_tip_up and middle_tip_up and ring_tip_up and not pinky_ext:
             scroll_y = (lm[8].y + lm[12].y + lm[16].y) / 3.0
             return Gesture.SCROLL, cx, scroll_y
@@ -192,14 +194,14 @@ class GestureClassifier:
         """Classify gestures for Builder mode (single hand)."""
         gc = self.gc
 
-        index_ext  = _finger_extended(lm, 8,  6)
+        index_ext = _finger_extended(lm, 8,  6)
         middle_ext = _finger_extended(lm, 12, 10)
-        ring_ext   = _finger_extended(lm, 16, 14)
-        pinky_ext  = _finger_extended(lm, 20, 18)
+        ring_ext = _finger_extended(lm, 16, 14)
+        pinky_ext = _finger_extended(lm, 20, 18)
 
-        index_tip_up  = _fingertip_raised(lm, 8,  5)
+        index_tip_up = _fingertip_raised(lm, 8,  5)
         middle_tip_up = _fingertip_raised(lm, 12, 9)
-        ring_tip_up   = _fingertip_raised(lm, 16, 13)
+        ring_tip_up = _fingertip_raised(lm, 16, 13)
 
         thumb_index_dist = _dist(lm[4], lm[8])
 
@@ -235,16 +237,20 @@ class GestureClassifier:
 def _cube_origin(gx, gy, gz, gs, ox, oy):
     return int(gx*gs + gz*ox), int(gy*gs - gz*oy)
 
-def _draw_iso_cube(frame, px, py, gs, color_bgr, alpha=1.0, outline=False, outline_color=(0,255,255)):
+
+def _draw_iso_cube(frame, px, py, gs, color_bgr, alpha=1.0, outline=False, outline_color=(0, 255, 255)):
     h = gs // 2
     b, g, r = color_bgr
 
     def shade(f):
-        return (int(min(255,b*f)), int(min(255,g*f)), int(min(255,r*f)))
+        return (int(min(255, b*f)), int(min(255, g*f)), int(min(255, r*f)))
 
-    top   = np.array([[px+gs//2,py],[px+gs,py+h],[px+gs//2,py+gs//2+h//2],[px,py+h]], np.int32)
-    left  = np.array([[px,py+h],[px+gs//2,py+gs//2+h//2],[px+gs//2,py+gs],[px,py+gs-h//2]], np.int32)
-    right = np.array([[px+gs//2,py+gs//2+h//2],[px+gs,py+h],[px+gs,py+gs-h//2],[px+gs//2,py+gs]], np.int32)
+    top = np.array([[px+gs//2, py], [px+gs, py+h],
+                   [px+gs//2, py+gs//2+h//2], [px, py+h]], np.int32)
+    left = np.array([[px, py+h], [px+gs//2, py+gs//2+h//2],
+                    [px+gs//2, py+gs], [px, py+gs-h//2]], np.int32)
+    right = np.array([[px+gs//2, py+gs//2+h//2], [px+gs, py+h],
+                     [px+gs, py+gs-h//2], [px+gs//2, py+gs]], np.int32)
 
     if alpha < 1.0:
         ov = frame.copy()
@@ -258,7 +264,7 @@ def _draw_iso_cube(frame, px, py, gs, color_bgr, alpha=1.0, outline=False, outli
         cv2.fillPoly(frame, [right], shade(0.6))
 
     edge = outline_color if outline else shade(0.3)
-    lw   = 2 if outline else 1
+    lw = 2 if outline else 1
     for poly in [top, left, right]:
         cv2.polylines(frame, [poly], True, edge, lw, cv2.LINE_AA)
 
@@ -266,14 +272,15 @@ def _draw_iso_cube(frame, px, py, gs, color_bgr, alpha=1.0, outline=False, outli
 # Vision Processor
 # ---------------------------------------------------------------------------
 
+
 class VisionProcessor:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
         self._classifier = GestureClassifier(cfg)
 
         self._prev_scroll_y: Optional[float] = None
-        self.last_landmarks       = None   # right hand landmarks
-        self.last_left_landmarks  = None   # left hand landmarks
+        self.last_landmarks = None   # right hand landmarks
+        self.last_left_landmarks = None   # left hand landmarks
         self.mirrored: bool = True
 
         # Pinky hold counter
@@ -299,12 +306,14 @@ class VisionProcessor:
             min_hand_presence_confidence=0.3,
             min_tracking_confidence=0.3,
         )
-        self._landmarker   = mp.tasks.vision.HandLandmarker.create_from_options(options)
+        self._landmarker = mp.tasks.vision.HandLandmarker.create_from_options(
+            options)
         self._mp_image_cls = mp.Image
-        self._mp_format    = mp.ImageFormat.SRGB
-        
+        self._mp_format = mp.ImageFormat.SRGB
+
         if self._modal_client:
-            logger.info("VisionProcessor using Modal cloud (with local fallback).")
+            logger.info(
+                "VisionProcessor using Modal cloud (with local fallback).")
         else:
             logger.info("VisionProcessor using local MediaPipe.")
 
@@ -325,13 +334,14 @@ class VisionProcessor:
             frame = self.decode_frame(frame_input)
         else:
             frame = frame_input
-            
-        if frame is None: return GestureState()
+
+        if frame is None:
+            return GestureState()
         return await self._process(frame, builder_mode)
 
     def process_frame_sync(self, frame_input, builder_mode=False) -> GestureState:
         """Pure-sync version safe to call from a thread-pool executor.
-        
+
         Does NOT call asyncio.run() — safe when called from run_in_executor()
         inside a running event loop.
         """
@@ -349,7 +359,8 @@ class VisionProcessor:
 
         # Local MediaPipe inference (synchronous, no cloud path)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = self._mp_image_cls(image_format=self._mp_format, data=frame_rgb)
+        mp_image = self._mp_image_cls(
+            image_format=self._mp_format, data=frame_rgb)
         result = self._landmarker.detect(mp_image)
 
         if not result.hand_landmarks:
@@ -366,9 +377,11 @@ class VisionProcessor:
             # If two hands, pick them by label first
             for i, hand in enumerate(hands):
                 label = handedness[i][0].category_name
-                if label == "Right": right_lm = hand
-                else: left_lm = hand
-            
+                if label == "Right":
+                    right_lm = hand
+                else:
+                    left_lm = hand
+
             # If only one hand found, ALWAYS treat it as the primary controller
             if right_lm is None and left_lm is not None:
                 right_lm = left_lm
@@ -430,8 +443,9 @@ class VisionProcessor:
         # --- High-Performance Cloud Path ---
         hands, handedness = [], []
         # Bypass cloud for Builder Mode to ensure sub-10ms latency
-        use_cloud = self._modal_client and os.environ.get("USE_MODAL", "false").lower() == "true" and not builder_mode
-        
+        use_cloud = self._modal_client and os.environ.get(
+            "USE_MODAL", "false").lower() == "true" and not builder_mode
+
         if use_cloud:
             try:
                 raw = await self._modal_client.detect(frame_bgr)
@@ -443,7 +457,8 @@ class VisionProcessor:
         # --- Local Fallback Path (if cloud fails or is disabled) ---
         if not hands:
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            mp_image = self._mp_image_cls(image_format=self._mp_format, data=frame_rgb)
+            mp_image = self._mp_image_cls(
+                image_format=self._mp_format, data=frame_rgb)
             result = self._landmarker.detect(mp_image)
             if result.hand_landmarks:
                 hands = result.hand_landmarks
@@ -452,9 +467,8 @@ class VisionProcessor:
                 self._pinky_hold_frames = 0
                 return state
 
-
         # --- Handedness Logic ---
-        # Since we flip the frame in the server, the user's Right hand 
+        # Since we flip the frame in the server, the user's Right hand
         # may be labeled "Left" by MediaPipe. We take the most confident hand.
         right_lm = None
         left_lm = None
@@ -462,15 +476,17 @@ class VisionProcessor:
         if hands:
             for i, hand in enumerate(hands):
                 label = handedness[i][0].category_name
-                if label == "Right": right_lm = hand
-                else: left_lm = hand
-            
+                if label == "Right":
+                    right_lm = hand
+                else:
+                    left_lm = hand
+
             # One-hand fallback: Always use whichever hand is visible
             if right_lm is None and left_lm is not None:
                 right_lm = left_lm
                 left_lm = None
 
-        self.last_landmarks      = right_lm
+        self.last_landmarks = right_lm
         self.last_left_landmarks = left_lm
 
         # --- Left fist detection ---
@@ -488,7 +504,7 @@ class VisionProcessor:
         # --- Classify gesture ---
         if right_lm is None:
             self._pinky_hold_frames = 0
-            self._prev_scroll_y     = None
+            self._prev_scroll_y = None
             return state
 
         lm = right_lm
@@ -513,12 +529,13 @@ class VisionProcessor:
         # Use raw_x directly because frame is pre-flipped in server loop
         cursor_x = raw_x
 
-        state.gesture            = gesture
-        state.cursor_x           = cursor_x
-        state.cursor_y           = raw_y
-        state.pinch_active       = gesture == Gesture.PINCH
+        state.gesture = gesture
+        state.cursor_x = cursor_x
+        state.cursor_y = raw_y
+        state.pinch_active = gesture == Gesture.PINCH
         state.thumb_pinch_active = gesture == Gesture.THUMB_PINCH
-        state.finger_count       = 3 if gesture == Gesture.THREE_FINGERS else 4 if gesture in (Gesture.FOUR_FINGERS, Gesture.SCROLL) else 0
+        state.finger_count = 3 if gesture == Gesture.THREE_FINGERS else 4 if gesture in (
+            Gesture.FOUR_FINGERS, Gesture.SCROLL) else 0
 
         # --- Scroll delta (4 fingers only) ---
         if gesture == Gesture.SCROLL:
@@ -533,7 +550,11 @@ class VisionProcessor:
     def _parse_modal_result(self, raw: dict):
         """Convert Modal JSON result into MediaPipe-compatible landmark objects."""
         class _LM:
-            def __init__(self, d): self.x=d["x"]; self.y=d["y"]; self.z=d["z"]
+            def __init__(self, d):
+                self.x = d["x"]
+                self.y = d["y"]
+                self.z = d["z"]
+
         class _Hand:
             def __init__(self, lms): self._lms = [_LM(l) for l in lms]
             def __getitem__(self, i): return self._lms[i]
@@ -542,9 +563,10 @@ class VisionProcessor:
         class _Handedness:
             def __init__(self, label):
                 self.category_name = label
+
             def __getitem__(self, i): return self
 
-        hands      = [_Hand(h["landmarks"]) for h in raw["hands"]]
+        hands = [_Hand(h["landmarks"]) for h in raw["hands"]]
         handedness = [[_Handedness(h["handedness"])] for h in raw["hands"]]
         return hands, handedness
 
@@ -556,17 +578,21 @@ class VisionProcessor:
         # ── Draw Canvas Paths (2D mode) ─────────────────────────────────────
         if state.active_mode == 1 and hasattr(state, 'canvas_paths'):
             for path in state.canvas_paths:
-                if len(path) < 2: continue
-                points = np.array([ [int(p[0]*w), int(p[1]*h)] for p in path], np.int32)
+                if len(path) < 2:
+                    continue
+                points = np.array([[int(p[0]*w), int(p[1]*h)]
+                                  for p in path], np.int32)
                 color = path[0][2] if len(path[0]) > 2 else (0, 255, 149)
-                cv2.polylines(annotated, [points], False, color, 3, cv2.LINE_AA)
+                cv2.polylines(annotated, [points],
+                              False, color, 3, cv2.LINE_AA)
 
         # ── Draw Builder Cubes (3D mode) ────────────────────────────────────
         if state.active_mode == 2 and hasattr(state, 'builder_world') and state.builder_world:
             cc = self.cfg.cube
             gs, ox, oy = cc.grid_size, cc.iso_offset_x, cc.iso_offset_y
             world = state.builder_world
-            selected_set = set(world.selected_group) if hasattr(world, 'selected_group') else set()
+            selected_set = set(world.selected_group) if hasattr(
+                world, 'selected_group') else set()
 
             # Draw back→front layers
             for gz in range(cc.num_layers-1, -1, -1):
@@ -576,14 +602,17 @@ class VisionProcessor:
                     key=lambda c: (-c.gy, -c.gx)
                 )
                 for cube in layer_cubes:
-                    px, py = _cube_origin(cube.gx, cube.gy, cube.gz, gs, ox, oy)
+                    px, py = _cube_origin(
+                        cube.gx, cube.gy, cube.gz, gs, ox, oy)
                     is_sel = cube in selected_set
-                    _draw_iso_cube(annotated, px, py, gs, color, 1.0, outline=is_sel, outline_color=cc.selected_color)
+                    _draw_iso_cube(annotated, px, py, gs, color, 1.0,
+                                   outline=is_sel, outline_color=cc.selected_color)
 
             # Draw Ghost preview
             if hasattr(state, 'builder_ghost') and state.builder_ghost:
                 px, py = _cube_origin(*state.builder_ghost, gs, ox, oy)
-                _draw_iso_cube(annotated, px, py, gs, cc.layer_colors[state.builder_ghost[2]], 0.5, True, (200,200,200))
+                _draw_iso_cube(annotated, px, py, gs,
+                               cc.layer_colors[state.builder_ghost[2]], 0.5, True, (200, 200, 200))
 
         # ── Draw Premium HUD Overlay ────────────────────────────────────────
         active = state.gesture and state.gesture != Gesture.IDLE
@@ -600,7 +629,7 @@ class VisionProcessor:
         # Draw label text
         cv2.putText(annotated, label, (25, 45),
                     cv2.FONT_HERSHEY_DUPLEX, 0.8, color, 1, cv2.LINE_AA)
-        
+
         # Draw small status light
         light_color = (0, 255, 0) if active else (0, 0, 255)
         cv2.circle(annotated, (20, 36), 4, light_color, -1)

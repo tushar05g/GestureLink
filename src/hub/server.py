@@ -1,4 +1,5 @@
 from __future__ import annotations
+import subprocess
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ import json
 import logging
 import platform
 from pathlib import Path
-from typing import Dict, Optional, Any, Annotated
+from typing import Dict, Optional, Annotated
 
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect, Request, Query
@@ -33,8 +34,10 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 load_dotenv()
 logger = logging.getLogger("gesture_control.remote")
 
+
 class EndpointFilter(logging.Filter):
     """Silences aggressive polling logs for specific endpoints."""
+
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
         silence = [
@@ -53,23 +56,25 @@ APP_DIR = Path(__file__).resolve().parent
 HUB_DIR = APP_DIR
 
 # Use resource_path() so these resolve correctly inside a PyInstaller .exe
-HUB_HTML     = resource_path("src/web/hub/hub.html")
-MOBILE_DIST  = resource_path("src/web/mobile/dist")
+HUB_HTML = resource_path("src/web/hub/hub.html")
+MOBILE_DIST = resource_path("src/web/mobile/dist")
 SETTINGS_FILE = HUB_DIR / "settings.json"
 SECURITY_FILE = HUB_DIR / "security.json"
 CERT_PEM = resource_path("cert.pem")
-KEY_PEM  = resource_path("key.pem")
+KEY_PEM = resource_path("key.pem")
+
 
 def _save_settings(sensitivity: int, scroll_speed: int, trackpad_sensitivity: float = 1.5) -> None:
     try:
         with open(SETTINGS_FILE, "w") as f:
             json.dump({
-                "sensitivity": sensitivity, 
+                "sensitivity": sensitivity,
                 "scroll_speed": scroll_speed,
                 "trackpad_sensitivity": trackpad_sensitivity
             }, f)
     except Exception as e:
         logger.error("Failed to save settings: %s", e)
+
 
 def _load_settings() -> None:
     if SETTINGS_FILE.exists():
@@ -81,30 +86,36 @@ def _load_settings() -> None:
                 sens = data.get("sensitivity", 50)
                 scroll = data.get("scroll_speed", 20)
                 tp_sens = data.get("trackpad_sensitivity", 1.5)
-                
+
                 # Apply vision settings
                 alpha = 0.05 + (sens - 5) / 90.0 * 0.45
                 thresh = 8.0 - (sens - 5) / 90.0 * 7.0
                 CONFIG.gesture.smoothing = alpha
                 CONFIG.gesture.move_threshold_px = max(0.5, thresh)
-                
+
                 # Apply trackpad/scroll settings
                 CONFIG.gesture.scroll_speed = int(scroll)
                 CONFIG.gesture.trackpad_sensitivity = float(tp_sens)
         except Exception as e:
             logger.error("Failed to load settings: %s", e)
 
+
 def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     from src.core.config import CONFIG
     from src.core.controller import MouseController
     from src.core.shortcuts import ShortcutManager
-    from src.core.vision import VisionProcessor, Gesture
+    from src.core.vision import VisionProcessor
     from src.hub.managers import SecurityManager, TokenManager, DeviceDiscovery, detect_lan_ip
     from src.core.vision_worker import AsyncVisionWorker
     from src.core.modes import MeetPaintController, BuilderController
 
     def _open_dashboard():
-        import webbrowser, subprocess, os, time, ssl, urllib.request
+        import webbrowser
+        import subprocess
+        import os
+        import time
+        import ssl
+        import urllib.request
 
         proto = "https" if CERT_PEM.exists() else "http"
         local_url = f"{proto}://localhost:{port}/hub"
@@ -123,7 +134,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
-            ctx.verify_mode    = ssl.CERT_NONE
+            ctx.verify_mode = ssl.CERT_NONE
 
             print(f"  * Custom domain detected — waiting for tunnel ({health_url})...")
             for attempt in range(40):           # probe every 0.5s, up to 20s
@@ -155,7 +166,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 try:
                     subprocess.Popen([path, f"--app={target_url}"])
                     return
-                except: pass
+                except Exception:
+
+                    pass
 
         webbrowser.open(target_url)     # fallback to system default browser
 
@@ -166,21 +179,24 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         app.state.cloudflare_url = None
         app.state.cf_proc = None
         app.state.friendly_name = platform.node()
-        
+
         _load_settings()
-        
+
         # Load Friendly Name from config
         config_path = os.path.join(os.path.dirname(__file__), "hub_config.json")
         if os.path.exists(config_path):
             try:
                 import json
                 with open(config_path, "r") as f:
-                    app.state.friendly_name = json.load(f).get("friendly_name", app.state.friendly_name)
-            except: pass
-            
+                    app.state.friendly_name = json.load(f).get(
+                        "friendly_name", app.state.friendly_name)
+            except Exception:
+
+                pass
+
         # --- WebRTC SIGNALING LISTENER (For Remote/Tunnel) ---
         async def _signaling_listener():
-            await asyncio.sleep(2) # Wait for tunnel to stabilize
+            await asyncio.sleep(2)  # Wait for tunnel to stabilize
             # Use 'hub_pc' as the primary mailbox to match mobile UI expectation
             target_id = "hub_pc"
             logger.info(f"WebRTC Signaling Listener active. Polling mailbox: '{target_id}'")
@@ -192,7 +208,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             logger.info(">>> Received Remote Offer via 'hub_pc'!")
                             offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
                             reply_target = payload.get("from") or "mobile_client"
-                            
+
                             from aiortc import RTCConfiguration, RTCIceServer
                             pc = RTCPeerConnection(configuration=RTCConfiguration(
                                 iceServers=[
@@ -207,32 +223,32 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                                 ]
                             ))
                             setup_pc(pc)
-                            
+
                             await pc.setRemoteDescription(offer)
                             answer = await pc.createAnswer()
                             await pc.setLocalDescription(answer)
-                            
+
                             # Send answer back to wherever the phone is listening
                             # Typically mobile apps listen on their own unique session ID or 'mobile_client'
                             await webrtc_signal(reply_target, {
                                 "sdp": pc.localDescription.sdp,
                                 "type": pc.localDescription.type
                             })
-                            logger.info("<<< Sent Remote Answer to '%s'. Handshake complete.", reply_target)
-                    
+                            logger.info(
+                                "<<< Sent Remote Answer to '%s'. Handshake complete.", reply_target)
+
                     await asyncio.sleep(0.2)
                 except Exception as e:
                     logger.error(f"Signaling listener error: {e}")
                     await asyncio.sleep(2)
-        
+
         asyncio.create_task(_signaling_listener())
 
         # --- FIREBASE SIGNALING (Replaces Cloudflare) ---
         async def _firebase_signaling_loop():
             import httpx
-            import time
             from aiortc import RTCConfiguration, RTCIceServer
-            
+
             FIREBASE_URL = "https://gesturelink-5db9c-default-rtdb.firebaseio.com"
             logger.info("Firebase Signaling active. Waiting for mobile peer...")
             # Create client ONCE to reuse connection pool and avoid TLS handshake blocking the event loop
@@ -243,17 +259,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         # If we already connected for this PIN, or no PIN, just sleep (don't poll Firebase)
                         await asyncio.sleep(2)
                         continue
-                        
+
                     try:
                         # Poll the mobile offer
                         res = await client.get(f"{FIREBASE_URL}/sessions/{pin}/mobile.json")
                         data = res.json()
-                        
+
                         if data and "offer" in data and not getattr(app.state, "firebase_answered_pin", None) == pin:
                             logger.info(f">>> Received Remote Offer via Firebase (PIN {pin})!")
                             offer_data = data["offer"]
-                            offer = RTCSessionDescription(sdp=offer_data["sdp"], type=offer_data["type"])
-                            
+                            offer = RTCSessionDescription(
+                                sdp=offer_data["sdp"], type=offer_data["type"])
+
                             pc = RTCPeerConnection(configuration=RTCConfiguration(
                                 iceServers=[
                                     RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
@@ -261,7 +278,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                                     RTCIceServer(urls=["stun:stun2.l.google.com:19302"]),
                                     RTCIceServer(
                                         urls=["turn:global.relay.metered.ca:80"],
-                                        username="d120fb319dff30d8d011f0cf", # Temporary public Metered credential
+                                        username="d120fb319dff30d8d011f0cf",  # Temporary public Metered credential
                                         credential="W0oY1T/dC+8v3hQf"
                                     ),
                                     RTCIceServer(
@@ -272,18 +289,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                                 ]
                             ))
                             setup_pc(pc)
-                            
+
                             await pc.setRemoteDescription(offer)
                             answer = await pc.createAnswer()
                             await pc.setLocalDescription(answer)
-                            
+
                             # Wait up to 3 seconds for ICE candidates to gather
                             # aiortc doesn't trickle easily, so we gather all first
                             for _ in range(30):
                                 if pc.iceGatheringState == "complete":
                                     break
                                 await asyncio.sleep(0.1)
-                                
+
                             # Write answer back to Firebase
                             ans_payload = {
                                 "sdp": pc.localDescription.sdp,
@@ -292,17 +309,17 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             await client.put(f"{FIREBASE_URL}/sessions/{pin}/hub/answer.json", json=ans_payload)
                             logger.info("<<< Sent Remote Answer via Firebase. Handshake complete.")
                             app.state.firebase_answered_pin = pin
-                            
+
                         # If a candidate is sent by mobile
                         if data and "candidates" in data:
                             for idx, cand in data["candidates"].items():
                                 # In a real implementation we add ICE candidates dynamically,
                                 # but aiortc handles them via SDP or addIceCandidate.
                                 pass
-                                
+
                     except Exception as e:
                         logger.error(f"Firebase signaling error: {e}")
-                    
+
                     await asyncio.sleep(1.5)
 
         app.state.firebase_task = asyncio.create_task(_firebase_signaling_loop())
@@ -316,37 +333,36 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         print("STARTING GESTURELINK HUB...")
         print(f"  * Local Dashboard:  {proto}://localhost:{port}/hub")
         print(f"  * Mobile Access:    {proto}://{lan_ip}:{port}")
-        
+
         # Display Remote Tunnels
         if getattr(app.state, "cloudflare_url", None):
             print(f"  * Remote (Cloudflare): {app.state.cloudflare_url}")
         if getattr(app.state, "ngrok_url", None):
             print(f"  * Remote (ngrok):      {app.state.ngrok_url}")
-            
+
         print(f"  * Pairing PIN:      {tokens.current_pin}")
         print("="*50 + "\n")
         logger.info("Hub Started successfully.")
-        
+
         # Background tasks
         import threading
         threading.Thread(target=_open_dashboard, daemon=True).start()
-        
+
         app.state.rotation_task = asyncio.create_task(_rotate_pin_periodically())
         app.state.cleanup_task = asyncio.create_task(_cleanup_signals_loop())
-        
-        
+
         # --- NGROK TUNNEL REMOVED ---
-        
+
         yield
-        
+
         # Shutdown
         # if app.state.ngrok_url:
         #     logger.info("Closing ngrok tunnel...")
         #     ngrok.disconnect(app.state.ngrok_url)
         #     ngrok.kill()
-            
+
         # Cloudflare tunnel logic removed
-            
+
         discovery.stop()
         vision_worker.stop()
         logger.info("Hub shutting down...")
@@ -365,15 +381,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     security = SecurityManager(SECURITY_FILE)
     tokens = TokenManager()
     discovery = DeviceDiscovery(port=port)
-    vision_worker = AsyncVisionWorker(CONFIG) # For remote mobile streams
+    vision_worker = AsyncVisionWorker(CONFIG)  # For remote mobile streams
     vision_worker.start()
-    
+
     # Unified local processor for Hub's camera
     vision_processor = VisionProcessor(CONFIG)
-    
+
     shortcuts = ShortcutManager()
     mouse = MouseController(CONFIG, shortcuts=shortcuts, responsive=True)
-    
+
     # Store in app state for access from other endpoints
     app.state.vision = vision_worker
     app.state.vision_processor = vision_processor
@@ -383,13 +399,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     app.state.active_mode = 0  # 0=Cursor, 1=MeetPaint, 2=Builder
     app.state.meet_paint = MeetPaintController(CONFIG)
     app.state.builder = BuilderController(CONFIG)
-    
+
     # Shared state — track live WebSocket sessions for the dashboard
     connected_clients: Dict[str, dict] = {}
     active_hub_dashboards = 0
 
     # WebRTC Signaling Hub with Timestamp tracking for cleanup
-    signals: Dict[str, dict] = {} # {id: {"q": Queue, "last_poll": timestamp}}
+    signals: Dict[str, dict] = {}  # {id: {"q": Queue, "last_poll": timestamp}}
 
     async def _cleanup_signals_loop():
         """B-02: Purge signaling queues for devices inactive for > 5 mins."""
@@ -415,7 +431,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         import time
         if target_id not in signals:
             signals[target_id] = {"q": asyncio.Queue(), "last_poll": time.time()}
-        
+
         signals[target_id]["last_poll"] = time.time()
         try:
             signal = await asyncio.wait_for(signals[target_id]["q"].get(), timeout=30.0)
@@ -450,7 +466,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         if not token:
             app.state.is_premium = False
             return JSONResponse({"ok": True, "premium": False})
-        
+
         try:
             import base64
             import json
@@ -461,7 +477,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 decoded = base64.b64decode(padded_payload)
                 user_info = json.loads(decoded)
                 uid = user_info.get("user_id")
-                
+
                 if uid:
                     db_url = f"https://gesturelink-5db9c-default-rtdb.firebaseio.com/users/{uid}.json"
                     async with httpx.AsyncClient() as client:
@@ -470,7 +486,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         if data and data.get("is_premium"):
                             app.state.is_premium = True
                             return JSONResponse({"ok": True, "premium": True})
-                
+
                 # If not premium by UID, check if their email was upgraded via Stripe
                 email = user_info.get("email")
                 if email:
@@ -482,7 +498,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         if data and data.get("isPremium"):
                             app.state.is_premium = True
                             return JSONResponse({"ok": True, "premium": True})
-                        
+
             app.state.is_premium = False
             return JSONResponse({"ok": True, "premium": False})
         except Exception as e:
@@ -496,7 +512,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         mode_id = payload.get("mode_id")
         if getattr(app.state, "is_premium", False):
             return JSONResponse({"status": "already_premium"})
-            
+
         if mode_id == 1:
             if getattr(app.state, "trial_active_1", False):
                 return JSONResponse({"status": "already_active"})
@@ -511,9 +527,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             app.state.trial_start_time_2 = time.time()
             logger.info("1-minute free trial activated for Builder (Mode 2).")
             return JSONResponse({"status": "success"})
-        
-        return JSONResponse({"status": "invalid_mode"})
 
+        return JSONResponse({"status": "invalid_mode"})
 
     @app.get("/api/connected-clients")
     async def get_connected_clients() -> JSONResponse:
@@ -537,7 +552,9 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 import json
                 with open(config_path, "w") as f:
                     json.dump({"friendly_name": name}, f)
-            except: pass
+            except Exception:
+
+                pass
             logger.info(f"Hub renamed to: {name}")
             return JSONResponse({"ok": True})
         return JSONResponse({"ok": False, "error": "Invalid name"}, status_code=400)
@@ -556,8 +573,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     cmd = "wmic cpu get loadpercentage"
                     res = subprocess.check_output(cmd, shell=True, text=True)
                     cpu = int(res.splitlines()[1].strip())
-                except: cpu = 5 # Placeholder if wmic fails
-            
+                except Exception:
+
+                    cpu = 5  # Placeholder if wmic fails
+
             return JSONResponse({
                 "cpu": cpu,
                 "storage_total": usage.total,
@@ -568,7 +587,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             return JSONResponse({"error": str(e)}, status_code=500)
 
     async def _get_network_profile() -> str:
-        if platform.system() != "Windows": return "Unknown"
+        if platform.system() != "Windows":
+            return "Unknown"
         try:
             cmd = "powershell -Command \"Get-NetConnectionProfile | Select-Object -ExpandProperty NetworkCategory\""
             proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -581,12 +601,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def fix_firewall() -> JSONResponse:
         if platform.system() != "Windows":
             return JSONResponse({"ok": False, "error": "Only supported on Windows"})
-        
+
         commands = [
             'netsh advfirewall firewall add rule name="GestureLink Hub" dir=in action=allow protocol=TCP localport=8000',
             'netsh advfirewall firewall add rule name="GestureLink Agent" dir=in action=allow protocol=TCP localport=8001'
         ]
-        
+
         results = []
         for cmd in commands:
             proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -595,14 +615,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 err = stderr.decode().strip() or stdout.decode().strip()
                 if "elevation" in err.lower() or "administrator" in err.lower():
                     return JSONResponse({
-                        "ok": False, 
+                        "ok": False,
                         "error": "Access Denied. Please restart GestureLink Hub as Administrator to fix firewall rules automatically."
                     })
                 results.append(err)
-        
+
         if any(results):
             return JSONResponse({"ok": False, "error": "; ".join(results)})
-            
+
         return JSONResponse({"ok": True, "message": "Firewall rules added successfully!"})
 
     @app.get("/api/discovered")
@@ -624,7 +644,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 hostname = data.get("hostname", ip)
         except Exception as e:
             return JSONResponse({"ok": False, "error": f"Could not reach Agent at {ip}:8001 — {e}"})
-        
+
         discovery.discovered_devices[ip] = hostname
         logger.info("Manually added Agent: %s at %s", hostname, ip)
         return JSONResponse({"ok": True, "ip": ip, "hostname": hostname})
@@ -648,11 +668,11 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         agent_id = payload.get("agent_id")
         if not agent_id:
             return JSONResponse({"ok": False, "error": "No agent ID"}, status_code=400)
-            
+
         uid = tokens.firebase_uid
         if not uid:
             return JSONResponse({"ok": False, "error": "Not logged in to Cloud"}, status_code=401)
-            
+
         from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
         pc = RTCPeerConnection(configuration=RTCConfiguration(
             iceServers=[
@@ -661,11 +681,11 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             ]
         ))
         setup_pc(pc)
-        
+
         # Create DataChannel for gestures
         channel = pc.createDataChannel("gestures")
-        app.state.cloud_agent_channel = channel # Save for vision_worker to use!
-        
+        app.state.cloud_agent_channel = channel  # Save for vision_worker to use!
+
         @channel.on("open")
         def on_open():
             logger.info(f"Cloud DataChannel {channel.label} opened to Agent {agent_id}")
@@ -681,12 +701,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
-        
+
         offer_data = {
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
         }
-        
+
         # Put offer into Firebase
         import urllib.request
         import json
@@ -699,7 +719,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             )
             with urllib.request.urlopen(req, timeout=5) as res:
                 pass
-                
+
             # Wait for answer
             import httpx
             import asyncio
@@ -712,13 +732,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         # Clear answer
                         try:
                             await client.delete(f"{FIREBASE_URL}/users/{uid}/agents/{agent_id}/signaling/agent_answer.json")
-                        except: pass
-                        
+                        except Exception:
+
+                            pass
+
                         answer = RTCSessionDescription(sdp=ans_data["sdp"], type=ans_data["type"])
                         await pc.setRemoteDescription(answer)
                         return JSONResponse({"ok": True})
                     await asyncio.sleep(1)
-            
+
             return JSONResponse({"ok": False, "error": "Agent did not answer"})
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)})
@@ -726,10 +748,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def _hub_camera_loop():
         global hub_video_frame, hub_camera_active
         import cv2
-        
-        indices = [0, 1, 2] # Try multiple common camera IDs
+
+        indices = [0, 1, 2]  # Try multiple common camera IDs
         cap = None
-        
+
         for idx in indices:
             logger.info(f"Hub camera loop: Trying index {idx}...")
             cap = cv2.VideoCapture(idx)
@@ -744,9 +766,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     logger.warning(f"Hub camera loop: Index {idx} opened but failed to read frame.")
             cap.release()
             cap = None
-            
+
         if cap is None:
-            logger.error("Hub camera loop: Could not find a working camera after trying indices 0, 1, 2.")
+            logger.error(
+                "Hub camera loop: Could not find a working camera after trying indices 0, 1, 2.")
             app.state.camera_active = False
             hub_camera_active = False
             return
@@ -770,7 +793,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             app.state.active_mode = 0
                             if hasattr(app.state, "meet_paint"):
                                 app.state.meet_paint.stop()
-                
+
                 # Check Builder trial (Mode 2)
                 if getattr(app.state, "trial_active_2", False):
                     if time.time() - getattr(app.state, "trial_start_time_2", 0) >= 60:
@@ -786,15 +809,16 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 if not ret:
                     consecutive_failures += 1
                     if consecutive_failures > 30:  # ~1 second of failure
-                        logger.error("Hub camera loop: Too many consecutive frame failures. Exiting.")
+                        logger.error(
+                            "Hub camera loop: Too many consecutive frame failures. Exiting.")
                         break
-                    await asyncio.sleep(0.1) # 100ms polling for faster signaling
+                    await asyncio.sleep(0.1)  # 100ms polling for faster signaling
                     continue
 
                 consecutive_failures = 0
                 # Flip at the start so AI and Display are ALWAYS in sync
                 frame = cv2.flip(frame, 1)
-                
+
                 try:
                     is_builder_mode = app.state.active_mode == 2
                     state = await vision_processor.process_frame(frame, is_builder_mode)
@@ -804,7 +828,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                     if state.mode_switch:
                         old_mode = app.state.active_mode
                         next_mode = (app.state.active_mode + 1) % 3
-                        
+
                         is_prem = getattr(app.state, "is_premium", False)
                         allowed = False
                         if next_mode == 1 and (is_prem or getattr(app.state, "trial_active_1", False)):
@@ -813,9 +837,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             allowed = True
                         elif next_mode == 0:
                             allowed = True
-                            
+
                         if not allowed:
-                            logger.warning("Blocked mode switch: Premium required for Meet Paint and Builder Mode.")
+                            logger.warning(
+                                "Blocked mode switch: Premium required for Meet Paint and Builder Mode.")
                         else:
                             app.state.active_mode = next_mode
                             logger.info(f"Mode switched! Active: {app.state.active_mode}")
@@ -831,7 +856,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                                 app.state.builder.stop()
 
                     # --- Mode Logic ---
-                    if app.state.active_mode == 1: # MEET PAINT
+                    if app.state.active_mode == 1:  # MEET PAINT
                         from src.core.config import CONFIG
                         sw, sh = CONFIG.screen_w, CONFIG.screen_h
                         # Translate cursor-mode gesture names → meet-paint gesture names.
@@ -840,7 +865,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         _MEET_PAINT_MAP = {
                             "LEFT_CLICK":  "PINCH",       # index + middle → draw stroke
                             "INDEX_MOVE":  "POINTING",    # index only     → laser pointer
-                            "RIGHT_CLICK": "RIGHT_CLICK", # rock sign      → erase nearest
+                            "RIGHT_CLICK": "RIGHT_CLICK",  # rock sign      → erase nearest
                             "SCROLL":      "SCROLL",      # 3 fingers      → hold-to-clear
                         }
                         mp_gesture = _MEET_PAINT_MAP.get(state.gesture.value, state.gesture.value)
@@ -849,12 +874,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             state.cursor_x, state.cursor_y,
                             sw, sh
                         )
-                    elif app.state.active_mode == 2: # BUILDER
+                    elif app.state.active_mode == 2:  # BUILDER
                         if state.gesture.value == "THUMB_PINCH":
-                             app.state.builder.handle_thumb_pinch_drag(
-                                 state.cursor_x, state.cursor_y, sw, sh,
-                                 (state.cursor_x, state.cursor_y), True
-                             )
+                            app.state.builder.handle_thumb_pinch_drag(
+                                state.cursor_x, state.cursor_y, sw, sh,
+                                (state.cursor_x, state.cursor_y), True
+                            )
                         else:
                             app.state.builder.update(
                                 state.gesture.value, state.cursor_x, state.cursor_y, sw, sh, state
@@ -870,7 +895,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         except Exception as e:
             logger.error(f"Hub camera loop crashed: {e}")
         finally:
-            if cap: cap.release()
+            if cap:
+                cap.release()
             app.state.camera_active = False
             logger.info("Hub camera loop: Terminated.")
 
@@ -904,7 +930,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             or (cloudflare_host and target == cloudflare_host)
             or (custom_host and target == custom_host)
         )
-        
+
         if is_hub:
             if active and not app.state.camera_active:
                 app.state.camera_active = True
@@ -914,7 +940,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 app.state.camera_active = False
                 logger.info("Hub local camera turned OFF")
             return JSONResponse({"ok": True, "active": app.state.camera_active})
-        
+
         # Otherwise proxy to agent
         try:
             import httpx
@@ -924,7 +950,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         except Exception as e:
             logger.error("Proxy camera toggle failed for %s: %s", target, e)
             return JSONResponse({"ok": False, "error": str(e)})
-    
+
     # --- WebRTC Low Latency Hub ---
     pcs = set()
 
@@ -942,22 +968,26 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         def on_datachannel(channel):
             class ChannelResponder:
                 def __init__(self, ch): self.ch = ch
+
                 async def send_json(self, data):
                     if self.ch.readyState == "open":
                         self.ch.send(json.dumps(data))
-            
+
             responder = ChannelResponder(channel)
+
             @channel.on("message")
             async def on_message(message):
                 if isinstance(message, str):
                     try:
                         await _handle_ws_message(responder, {"text": message}, None, mouse)
-                    except: pass
+                    except Exception:
+
+                        pass
 
     @app.post("/api/webrtc/offer")
     async def webrtc_offer(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
-        
+
         # Add STUN + TURN servers for hotspot/double-NAT traversal
         from aiortc import RTCConfiguration, RTCIceServer
         pc = RTCPeerConnection(configuration=RTCConfiguration(
@@ -988,7 +1018,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.get("/api/hub/camera/status")
     async def get_hub_camera_status(target: Optional[str] = Query(None)):
         lan_ip = detect_lan_ip()
-        
+
         ngrok_host = ""
         if hasattr(app.state, "ngrok_url") and app.state.ngrok_url:
             from urllib.parse import urlparse
@@ -1012,13 +1042,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             or (cloudflare_host and target == cloudflare_host)
             or (custom_host and target == custom_host)
         )
-        
+
         if is_hub:
             status = "inactive"
             if app.state.camera_active:
                 status = "active" if hub_camera_active else "starting"
             return JSONResponse({"active": hub_camera_active, "status": status})
-            
+
         # Otherwise proxy to agent
         try:
             import httpx
@@ -1052,7 +1082,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         elif old_mode == 1 and new_mode != 1:
             app.state.meet_paint.stop()
             logger.info("MeetPaintController: overlay stopped via API mode switch.")
-            
+
         # Manage Builder overlay lifecycle
         if new_mode == 2 and old_mode != 2:
             app.state.builder.start()
@@ -1060,7 +1090,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         elif old_mode == 2 and new_mode != 2:
             app.state.builder.stop()
             logger.info("BuilderController: overlay stopped via API mode switch.")
-            
+
         return JSONResponse({"ok": True, "mode": new_mode})
 
     # --- Meet Paint Remote Control Endpoints ---
@@ -1092,13 +1122,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def get_modal_status():
         """Returns the connection status and latency of the Modal cloud inference."""
         import os
-        from src.core.vision import VisionProcessor
         # Check if USE_MODAL is true in env
         use_modal = os.environ.get("USE_MODAL", "false").lower() == "true"
         client = None
         if hasattr(app.state, 'vision_processor') and hasattr(app.state.vision_processor, '_modal_client'):
             client = app.state.vision_processor._modal_client
-            
+
         return JSONResponse({
             "enabled": use_modal,
             "connected": bool(client)
@@ -1109,21 +1138,21 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         """Enables or disables Modal cloud inference dynamically."""
         import os
         from dotenv import set_key
-        
+
         enabled = payload.get("enabled", False)
         val = "true" if enabled else "false"
         os.environ["USE_MODAL"] = val
-        
+
         env_path = os.path.join(APP_DIR, ".env")
         if os.path.exists(env_path):
             set_key(env_path, "USE_MODAL", val)
-            
+
         # If enabling and client doesn't exist, we must re-init the vision processor's client
         if enabled and hasattr(app.state, 'vision_processor'):
             if not app.state.vision_processor._modal_client:
                 from src.core.modal_vision import get_modal_client
                 app.state.vision_processor._modal_client = get_modal_client()
-                
+
         # Also update the worker process if it exists
         if enabled and hasattr(app.state, 'vision') and app.state.vision:
             # We don't have a direct way to update the vision_worker's env inside its process
@@ -1150,11 +1179,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def hub_shutdown():
         """Called by hub.html when the browser window/tab is closed (sendBeacon).
         Triggers a full force-kill so no ghost processes remain."""
-        import subprocess, threading
+        import subprocess
+        import threading
         logger.info("Shutdown requested via browser close.")
 
         def _kill():
-            import time, os
+            import time
+            import os
             time.sleep(0.3)  # brief delay so HTTP response can be sent first
             try:
                 subprocess.run(
@@ -1180,7 +1211,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             except Exception as e:
                 logger.error("Proxy apps failed for %s: %s", ip, e)
                 return JSONResponse({"apps": [], "error": str(e)})
-        
+
         # Default: local hub apps
         apps = shortcuts.get_available_apps()
         return JSONResponse({"apps": apps})
@@ -1219,7 +1250,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         logger.info(f"Pair attempt from {client_ip} ({hostname}) with PIN {pin}")
 
         if str(pin) != tokens.current_pin:
-            logger.warning(f"Invalid PIN from {client_ip}. Expected {tokens.current_pin}, got {pin}")
+            logger.warning(
+                f"Invalid PIN from {client_ip}. Expected {tokens.current_pin}, got {pin}")
             return JSONResponse({"status": "error", "error": "Invalid PIN"}, status_code=401)
 
         # Auto-approve trusted IPs — no popup needed for known devices
@@ -1252,7 +1284,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         # Add to pending — Hub UI will show the approval popup
         req_id = security.add_pending_request(client_ip, hostname)
-        logger.info("APK pair-request pending for %s (%s) -> req_id=%s", client_ip, hostname, req_id)
+        logger.info("APK pair-request pending for %s (%s) -> req_id=%s",
+                    client_ip, hostname, req_id)
         return JSONResponse({"status": "pending", "request_id": req_id})
 
     @app.get("/api/pair/status/{request_id}")
@@ -1286,8 +1319,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         req_id = payload.get("id")
         req = security.pending_requests.get(req_id)
         if not req:
-             return JSONResponse({"ok": False, "error": "Request not found"}, status_code=404)
-        
+            return JSONResponse({"ok": False, "error": "Request not found"}, status_code=404)
+
         token = tokens.generate_token(req["ip"])
         if security.approve_request(req_id, token):
             return JSONResponse({"ok": True})
@@ -1299,10 +1332,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         security.reject_request(req_id)
         return JSONResponse({"ok": True})
 
-
     @app.post("/api/hub/shutdown")
     async def shutdown_hub() -> JSONResponse:
-        import os, signal
+        import os
+        import signal
         logger.info("Hub shutdown requested via API")
         # Send SIGTERM to self. tray.py handles this for a clean exit.
         os.kill(os.getpid(), signal.SIGTERM)
@@ -1319,7 +1352,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.post("/api/security/action")
     async def security_action(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         ip, action = payload.get("ip"), payload.get("action")
-        if not ip: return JSONResponse({"ok": False}, status_code=400)
+        if not ip:
+            return JSONResponse({"ok": False}, status_code=400)
         if action == "trust":
             security.trusted_ips.add(ip)
             security.blocked_ips.discard(ip)
@@ -1357,19 +1391,20 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def set_settings(payload: Annotated[dict, Body(...)]) -> JSONResponse:
         sens = payload.get("sensitivity", 50)
         scroll = payload.get("scroll_speed", 20)
-        
+
         # If 'sensitivity' (0-100) is sent from mobile, map it to the 0.5-3.0 trackpad multiplier
         # Otherwise use the provided trackpad_sensitivity or the current value.
         if "trackpad_sensitivity" in payload:
             tp_sens = float(payload["trackpad_sensitivity"])
         else:
             tp_sens = 0.5 + (sens / 100.0) * 2.5
-        
+
         _save_settings(sens, scroll, tp_sens)
-        _load_settings() # Re-apply local
-        
+        _load_settings()  # Re-apply local
+
         # Propagate to discovered agents
         import httpx
+
         async def notify_agents():
             for ip in discovery.discovered_devices:
                 try:
@@ -1377,15 +1412,15 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         # Map 1.5 base to a 0-100 scale if agent expects "sensitivity"
                         # Or just send trackpad_sensitivity directly
                         await client.post(
-                            f"https://{ip}:8001/api/settings", 
+                            f"https://{ip}:8001/api/settings",
                             json={"trackpad_sensitivity": tp_sens},
                             timeout=2.0
                         )
                 except Exception as e:
                     logger.warning(f"Failed to sync settings to Agent {ip}: {e}")
-        
+
         asyncio.create_task(notify_agents())
-        
+
         return JSONResponse({"ok": True})
 
     @app.websocket("/ws")
@@ -1398,7 +1433,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         # Token validation IS the security gate.
         if not tokens.validate_token(token):
             logger.warning("WS rejected: invalid token from %s", client_ip)
-            await asyncio.sleep(0.1) # Debounced rejection
+            await asyncio.sleep(0.1)  # Debounced rejection
             await ws.close(code=4003)
             return
 
@@ -1433,7 +1468,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         if not is_local:
             logger.info("RELAY PATH: proxying %s -> Agent %s", client_ip, target)
-            
+
             # Try WSS first, fallback to WS if Agent isn't using SSL
             async def connect_to_agent():
                 # permissive SSL context for self-signed certs
@@ -1441,7 +1476,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 ssl_ctx = _ssl.create_default_context()
                 ssl_ctx.check_hostname = False
                 ssl_ctx.verify_mode = _ssl.CERT_NONE
-                
+
                 try:
                     agent_url_wss = f"wss://{target}:8001/ws?token=hub_internal"
                     return await websockets.connect(agent_url_wss, ssl=ssl_ctx, open_timeout=2)
@@ -1499,26 +1534,28 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         nonlocal active_hub_dashboards
         if token == "hub_internal":
             active_hub_dashboards += 1
-            
+
         connected_clients[client_ip] = {
             "ip": client_ip,
             "connected_at": int(time.time()),
             "type": "mobile"
         }
         logger.info("Client connected: %s", client_ip)
+
         async def ws_receive_loop():
             try:
                 while True:
                     msg = await ws.receive()
                     if "bytes" in msg:
                         # Process vision in a background task so it doesn't block the loop
-                        asyncio.create_task(_handle_vision_frame(ws, msg["bytes"], vision_worker, mouse))
+                        asyncio.create_task(_handle_vision_frame(
+                            ws, msg["bytes"], vision_worker, mouse))
                     elif "text" in msg:
                         await _handle_ws_message(ws, msg, vision_worker, mouse)
             except WebSocketDisconnect:
                 pass
             except Exception as e:
-                if "receive" not in str(e): # Suppress noisy disconnect errors
+                if "receive" not in str(e):  # Suppress noisy disconnect errors
                     logger.error("WS Loop Error: %s", e)
 
         try:
@@ -1528,12 +1565,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             logger.info("Client disconnected: %s", client_ip)
             if token == "hub_internal":
                 active_hub_dashboards -= 1
+
                 async def check_shutdown():
                     await asyncio.sleep(1.5)
                     if active_hub_dashboards <= 0:
                         logger.info("Local dashboard closed. Shutting down Hub...")
                         # os._exit(0)
-                        pass
                 asyncio.create_task(check_shutdown())
 
     def dispatch_mouse(state, mouse):
@@ -1566,50 +1603,62 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 status = dispatch_mouse(state, mouse)
                 try:
                     await responder.send_json({"status": status, "type": "gesture"})
-                except: pass
+                except Exception:
+
+                    pass
 
     async def _handle_ws_message(responder, msg, vision, mouse):
         cloud_ch = getattr(app.state, "cloud_agent_channel", None)
         if cloud_ch and cloud_ch.readyState == "open":
             try:
                 cloud_ch.send(msg["text"])
-                if responder: await responder.send_json({"status": "SENT_TO_CLOUD"})
-            except: pass
+                if responder:
+                    await responder.send_json({"status": "SENT_TO_CLOUD"})
+            except Exception:
+
+                pass
             return
-            
+
         try:
             data = json.loads(msg["text"])
             mtype = data.get("type")
-            
+
             if (mtype in ("touch", "move")):
                 mouse.handle_touch_move(float(data.get("dx", 0)), float(data.get("dy", 0)))
                 # No response needed for high-frequency moves
             elif mtype == "click":
                 res = mouse.handle_click(data.get("button", "left"))
-                if responder: await responder.send_json({"status": res})
+                if responder:
+                    await responder.send_json({"status": res})
             elif mtype in ("click_down", "click_up"):
                 is_down = (mtype == "click_down")
                 res = mouse.handle_click_state(data.get("button", "left"), is_down)
-                if responder: await responder.send_json({"status": res})
+                if responder:
+                    await responder.send_json({"status": res})
             elif mtype == "scroll":
                 res = mouse.handle_touch_scroll(float(data.get("dy", 0)))
-                if responder: await responder.send_json({"status": res})
+                if responder:
+                    await responder.send_json({"status": res})
             elif mtype == "zoom":
                 res = mouse.handle_touch_zoom(float(data.get("delta", 0)))
-                if responder: await responder.send_json({"status": res})
+                if responder:
+                    await responder.send_json({"status": res})
             elif mtype == "shortcut":
                 res = mouse.handle_touch_shortcut(data.get("slot", ""))
-                if responder: await responder.send_json({"status": res})
+                if responder:
+                    await responder.send_json({"status": res})
             elif mtype == "key":
                 key = data.get("key")
                 if key:
                     res = mouse.handle_key(key)
-                    if responder: await responder.send_json({"status": res})
+                    if responder:
+                        await responder.send_json({"status": res})
             elif mtype == "hotkey":
                 keys = data.get("keys", [])
                 if keys:
                     res = mouse.handle_hotkey(keys)
-                    if responder: await responder.send_json({"status": res})
+                    if responder:
+                        await responder.send_json({"status": res})
             elif mtype == "camera_toggle":
                 active = data.get("active", False)
                 try:
@@ -1621,7 +1670,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                         if app.state.vision.is_running:
                             app.state.vision.stop()
                             logger.info("Camera stopped via WS/WebRTC")
-                    if responder: await responder.send_json({"status": "CAMERA_TOGGLED", "active": app.state.vision.is_running})
+                    if responder:
+                        await responder.send_json({"status": "CAMERA_TOGGLED", "active": app.state.vision.is_running})
                 except Exception as e:
                     logger.error("Camera toggle error: %s", e)
         except Exception as e:
@@ -1630,6 +1680,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     # Static Assets
     if MOBILE_DIST.exists():
         app.mount("/assets", StaticFiles(directory=str(MOBILE_DIST / "assets")), name="assets")
+
         @app.get("/")
         async def index():
             return FileResponse(MOBILE_DIST / "index.html")
@@ -1642,18 +1693,20 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         async def icon192(): return FileResponse(MOBILE_DIST / "icon-192.png")
         @app.get("/icon-512.png")
         async def icon512(): return FileResponse(MOBILE_DIST / "icon-512.png")
-    
+
     @app.get("/mobile.html")
     async def mobile_page_alias():
         return FileResponse(MOBILE_DIST / "index.html")
+
     @app.get("/hub")
     async def hub_page():
         with open(HUB_HTML, "r", encoding="utf-8") as f:
             content = f.read()
-            
+
         # Prioritize Custom Domain > Cloudflare > ngrok
-        remote_url = os.getenv("HUB_URL") or getattr(app.state, "cloudflare_url", None) or getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
-        
+        remote_url = os.getenv("HUB_URL") or getattr(app.state, "cloudflare_url", None) or getattr(
+            app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
+
         info = {
             "pin": tokens.current_pin,
             "lan_ip": detect_lan_ip(),
@@ -1666,26 +1719,28 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         injection += "\ndocument.addEventListener('DOMContentLoaded', () => {"
         injection += f"\n  document.getElementById('pin-display').textContent = '{tokens.current_pin}';"
         injection += "\n});"
-        
+
         content = content.replace("/*INFO_INJECTION*/", injection)
         return HTMLResponse(content)
 
     @app.get("/lan-qr.png")
     async def qr_gen(request: Request, url: Optional[str] = None, pin: Optional[str] = None) -> StreamingResponse:
         frontend_base = os.getenv("FRONTEND_URL") or "https://app.thequinn.tech"
-        
 
         # Use X-Forwarded-Host if behind a tunnel (Cloudflare, ngrok)
         host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
         # Remove port if present for hostname check
         hostname = host.split(":")[0] if ":" in host else host
-        
+
         # Detect cloud presence (headers or non-local hostname)
-        is_cloud_header = any(h in request.headers for h in ["cf-ray", "cf-connecting-ip", "x-ngrok-file-config"])
-        
+        is_cloud_header = any(h in request.headers for h in [
+                              "cf-ray", "cf-connecting-ip", "x-ngrok-file-config"])
+
         def is_private_ip(ip):
-            if ip in ("localhost", "127.0.0.1", "::1"): return True
-            if ip.startswith("192.168.") or ip.startswith("10."): return True
+            if ip in ("localhost", "127.0.0.1", "::1"):
+                return True
+            if ip.startswith("192.168.") or ip.startswith("10."):
+                return True
             if ip.startswith("172."):
                 parts = ip.split(".")
                 if len(parts) >= 2 and parts[1].isdigit():
@@ -1695,10 +1750,10 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         is_local = not is_cloud_header and (is_private_ip(hostname) or hostname.endswith(".local"))
         logger.info(f"QR Request - Host: {host}, is_local: {is_local}, is_cloud: {is_cloud_header}")
-        
+
         # Get the active tunnel URL if it exists
         tunnel_url = os.getenv("HUB_URL") or getattr(app.state, 'cloudflare_url', None)
-        
+
         if url:
             target = url
         else:
@@ -1709,18 +1764,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 hub_address = host
             else:
                 hub_address = detect_lan_ip() + f":{port}"
-                
+
             # Clean up the hostname
             hub_hostname = hub_address.replace("https://", "").replace("http://", "").rstrip("/")
-            
+
             # Always use the hosted frontend URL to ensure consistency
             target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
-                
+
             logger.info(f"QR pointing to: {target}")
-            
+
         if pin:
             target += ("&" if "?" in target else "?") + f"pin={pin}"
-            
+
         logger.info(f"QR Final Target: {target}")
         qr = qrcode.make(target)
         buf = io.BytesIO()
@@ -1736,7 +1791,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     async def download_qr_gen() -> StreamingResponse:
         frontend_base = os.getenv("FRONTEND_URL") or "https://gesture-link-iota.vercel.app"
         target = f"{frontend_base.rstrip('/')}/download"
-        
+
         logger.info(f"Download QR Target: {target}")
         qr = qrcode.make(target)
         buf = io.BytesIO()
@@ -1749,11 +1804,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     async def _rotate_pin_periodically():
         while True:
-            await asyncio.sleep(1800) # 30 minutes
+            await asyncio.sleep(1800)  # 30 minutes
             tokens.reset_pin()
             logger.info("Background PIN rotation triggered.")
 
     return app
+
 
 def run():
     import multiprocessing
@@ -1761,31 +1817,33 @@ def run():
         multiprocessing.freeze_support()
         try:
             multiprocessing.set_start_method('spawn', force=True)
-        except RuntimeError: pass
+        except RuntimeError:
+            pass
 
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    
+
     # Port 12: Kill existing processes and free up port before starting
     from src.core.utils import kill_process_on_port, kill_processes_by_name
     print(f"[*] Initializing Hub on port {args.port}...")
     kill_process_on_port(args.port)
     kill_processes_by_name(["cloudflared", "GestureLink_Hub"])
-    
+
     project_root = Path(__file__).resolve().parent.parent.parent
     cert = resource_path("cert.pem")
-    key  = resource_path("key.pem")
+    key = resource_path("key.pem")
     ssl = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)} if cert.exists() else {}
-    
+
     app = build_app(args.host, args.port)
-    
+
     # Apply filter to uvicorn access logs to prevent console spam
     logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
-    
+
     uvicorn.run(app, host=args.host, port=args.port, **ssl)
+
 
 if __name__ == "__main__":
     run()
