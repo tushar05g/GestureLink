@@ -1704,17 +1704,14 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         else:
             # Determine the hub address (either the custom domain, Cloudflare tunnel or the local LAN IP)
             if tunnel_url:
-                hub_address = tunnel_url
+                hub_address = tunnel_url.replace("https://", "").replace("http://", "").rstrip("/")
+                target = f"{frontend_base.rstrip('/')}/?hub={hub_address}"
             elif not is_local:
-                hub_address = host
+                hub_address = host.replace("https://", "").replace("http://", "").rstrip("/")
+                target = f"{frontend_base.rstrip('/')}/?hub={hub_address}"
             else:
-                hub_address = detect_lan_ip() + f":{port}"
-                
-            # Clean up the hostname
-            hub_hostname = hub_address.replace("https://", "").replace("http://", "").rstrip("/")
-            
-            # Always use the hosted frontend URL to ensure consistency
-            target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
+                proto = "https" if CERT_PEM.exists() else "http"
+                target = f"{proto}://{detect_lan_ip()}:{port}/mobile.html"
                 
             logger.info(f"QR pointing to: {target}")
             
