@@ -63,7 +63,6 @@ let dataChannel: RTCDataChannel | null = null;
 
 // DOM Elements
 const pairingOverlay = document.getElementById("pairingOverlay")!;
-const pinInputs = document.querySelectorAll<HTMLInputElement>(".pin-box");
 const pairBtn = document.getElementById("pairBtn")!;
 const pairError = document.getElementById("pairError")!;
 const pairStatusText = document.getElementById("pairStatusText")!;
@@ -89,7 +88,7 @@ const kbBtn = document.getElementById("kbBtn")!;
 async function init() {
   setupNav();
   setupTouchpad();
-  setupPinInputs();
+  setupScanBtn();
   setupShortcuts();
   setupKeyboardToolbar();
 
@@ -1041,19 +1040,19 @@ async function saveSettings() {
   } catch (e) { alert("Save failed"); }
 }
 
-function setupPinInputs() {
-  // Remove any duplicate input handler by cloning (the inline script in HTML handles focus only)
-  pinInputs.forEach((input) => {
-    // Only attach the pair-on-complete behavior; focus is handled by inline script
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') pairBtn.click();
-    });
-  });
-
+function setupScanBtn() {
   pairBtn.onclick = async () => {
-    pairError.style.opacity = '0';
-    const pin = Array.from(pinInputs).map(i => i.value).join("");
-    await autoPair(pin);
+    // Hide the overlay
+    pairingOverlay.classList.add('hidden');
+    setTimeout(() => pairingOverlay.style.display = 'none', 500);
+    
+    // Switch to Devices tab
+    const devicesTabBtn = document.querySelector('.nav-item[onclick*="devices"]') as HTMLElement;
+    if (devicesTabBtn) devicesTabBtn.click();
+    
+    // Trigger network scan
+    const scanBtn = document.getElementById("scanBtn");
+    if (scanBtn) scanBtn.click();
   };
 }
 
