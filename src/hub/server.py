@@ -277,6 +277,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                             answer = await pc.createAnswer()
                             await pc.setLocalDescription(answer)
                             
+                            # Wait up to 3 seconds for ICE candidates to gather
+                            # aiortc doesn't trickle easily, so we gather all first
+                            for _ in range(30):
+                                if pc.iceGatheringState == "complete":
+                                    break
+                                await asyncio.sleep(0.1)
+                                
                             # Write answer back to Firebase
                             ans_payload = {
                                 "sdp": pc.localDescription.sdp,

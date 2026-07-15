@@ -570,6 +570,27 @@ async function initWebRTC(isFallback = false) {
   const offer = await peerConn.createOffer();
   await peerConn.setLocalDescription(offer);
   
+  // Wait for ICE gathering to complete so STUN/TURN candidates are included in SDP
+  await new Promise<void>((resolve) => {
+    if (peerConn.iceGatheringState === 'complete') {
+      resolve();
+    } else {
+      const checkState = () => {
+        if (peerConn.iceGatheringState === 'complete') {
+          peerConn.removeEventListener('icegatheringstatechange', checkState);
+          resolve();
+        }
+      };
+      peerConn.addEventListener('icegatheringstatechange', checkState);
+      setTimeout(() => {
+        peerConn.removeEventListener('icegatheringstatechange', checkState);
+        resolve();
+      }, 3000);
+    }
+  });
+
+  const finalOffer = peerConn.localDescription || offer;
+  
   // Get current PIN
   let pin = "";
   const autoPin = new URLSearchParams(globalThis.location.search).get('pin');
@@ -585,7 +606,7 @@ async function initWebRTC(isFallback = false) {
   console.log("Writing offer to Firebase...");
   const sessionRef = ref(db, `sessions/${pin}/mobile`);
   await set(sessionRef, {
-      offer: { sdp: offer.sdp, type: offer.type },
+      offer: { sdp: finalOffer.sdp, type: finalOffer.type },
       timestamp: Date.now()
   });
 
