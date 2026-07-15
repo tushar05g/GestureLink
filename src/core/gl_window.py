@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 try:
     import glfw
-    from OpenGL.GL import *
     _GLFW_AVAILABLE = True
 except ImportError:
     _GLFW_AVAILABLE = False
@@ -21,13 +20,13 @@ except ImportError:
 
 class GLWindow:
     def __init__(self, cfg, world) -> None:
-        self.cfg        = cfg
-        self._w         = cfg.screen_w
-        self._h         = cfg.screen_h
-        self._win       = None
-        self._renderer  = None
-        self._world     = world
-        self._open      = False
+        self.cfg = cfg
+        self._w = cfg.screen_w
+        self._h = cfg.screen_h
+        self._win = None
+        self._renderer = None
+        self._world = world
+        self._open = False
 
     def open(self) -> bool:
         if not _GLFW_AVAILABLE:
@@ -74,12 +73,12 @@ class GLWindow:
         glfw.make_context_current(self._win)
         glfw.poll_events()
         self._renderer.render(
-            ghost        = ghost,
-            erase_ghost  = erase_ghost,
-            selected_set = selected_set,
-            webcam_frame = webcam_frame,
-            status       = status,
-            pinky_progress = pinky_progress,
+            ghost=ghost,
+            erase_ghost=erase_ghost,
+            selected_set=selected_set,
+            webcam_frame=webcam_frame,
+            status=status,
+            pinky_progress=pinky_progress,
         )
         glfw.swap_buffers(self._win)
 
@@ -87,6 +86,6 @@ class GLWindow:
         if self._win:
             glfw.destroy_window(self._win)
             glfw.terminate()
-            self._win  = None
+            self._win = None
             self._open = False
             logger.info("GL window closed.")

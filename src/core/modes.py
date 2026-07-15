@@ -11,7 +11,6 @@ import logging
 from enum import Enum, auto
 from typing import Optional
 
-import numpy as np
 
 from src.core.meet_overlay import MeetOverlay
 from src.core.builder_overlay import BuilderOverlay
@@ -32,11 +31,10 @@ except ImportError:
         logger.warning("Builder Mode 'world' module not found. 3D Builder will be disabled.")
 
 
-
 class AppMode(Enum):
     PRODUCTIVITY = auto()
-    MEET_PAINT   = auto()   # replaces Canvas — draws on transparent screen overlay
-    BUILDER      = auto()
+    MEET_PAINT = auto()   # replaces Canvas — draws on transparent screen overlay
+    BUILDER = auto()
 
 
 class MeetPaintController:
@@ -179,8 +177,8 @@ class BuilderController:
     """
 
     def __init__(self, cfg) -> None:
-        self.cfg   = cfg
-        self.cc    = cfg.cube
+        self.cfg = cfg
+        self.cc = cfg.cube
         if HAS_BUILDER and CubeWorld:
             self.world = CubeWorld(max_undo=cfg.cube.max_undo)
         else:
@@ -193,13 +191,13 @@ class BuilderController:
         self._erase_ghost:  Optional[tuple] = None
 
         # Paint state
-        self._painting:      bool  = False
-        self._paint_hold:    int   = 0
+        self._painting:      bool = False
+        self._paint_hold:    int = 0
         self._last_painted:  Optional[tuple] = None
 
         # Pinch drag (move)
-        self._dragging:           bool  = False
-        self._drag_group:         list  = []
+        self._dragging:           bool = False
+        self._drag_group:         list = []
         self._drag_origin_grid:   Optional[tuple] = None
 
         # Toggle debounce
@@ -232,10 +230,10 @@ class BuilderController:
     def stop(self) -> None:
         """Close the overlay window. Call when leaving BUILDER mode."""
         self.overlay.stop()
-        self._painting     = False
-        self._paint_hold   = 0
-        self._ghost        = None
-        self._erase_ghost  = None
+        self._painting = False
+        self._paint_hold = 0
+        self._ghost = None
+        self._erase_ghost = None
         logger.info("BuilderController: overlay stopped.")
 
     # ------------------------------------------------------------------
@@ -268,7 +266,7 @@ class BuilderController:
         gx = max(0, (px - gz * ox) // gs)
         gy = max(0, (py + gz * oy) // gs)
 
-        self._ghost       = None
+        self._ghost = None
         self._erase_ghost = None
         status = "BUILDER"
 
@@ -280,7 +278,7 @@ class BuilderController:
             self._push_render(nx, ny, status)
             return status
         else:
-            self._prev_right_index      = None
+            self._prev_right_index = None
             self._prev_thumb_index_dist = None
 
         # ---- Toggle cooldown tick ----------------------------------------
@@ -297,8 +295,8 @@ class BuilderController:
         # ---- Single-hand gestures ----------------------------------------
         if gesture == "POINTING":
             self._ghost = (int(gx), int(gy), gz)
-            self._painting    = False
-            self._paint_hold  = 0
+            self._painting = False
+            self._paint_hold = 0
             self._stop_drag()
             status = "PREVIEW"
 
@@ -315,8 +313,8 @@ class BuilderController:
             status = "PAINTING"
 
         elif gesture == "SCROLL":
-            self._painting    = False
-            self._paint_hold  = 0
+            self._painting = False
+            self._paint_hold = 0
             self._stop_drag()
             eg = (int(gx), int(gy), gz)
             self._erase_ghost = eg
@@ -327,13 +325,13 @@ class BuilderController:
             status = "ERASING"
 
         elif gesture == "RIGHT_CLICK":
-            self._painting   = False
+            self._painting = False
             self._paint_hold = 0
             if self.world and self.world.undo():
                 status = "UNDO"
 
         else:
-            self._painting   = False
+            self._painting = False
             self._paint_hold = 0
             self._stop_drag()
 
@@ -344,12 +342,12 @@ class BuilderController:
         """Push current world state to the overlay for immediate rendering."""
         pinky_prog = self._pinky_hold_frames / self._PINKY_HOLD_REQUIRED
         self.overlay.update(
-            world          = self.world,
-            ghost          = self._ghost,
-            erase_ghost    = self._erase_ghost,
-            status         = status,
-            pinky_progress = pinky_prog,
-            cursor_norm    = (nx, ny),
+            world=self.world,
+            ghost=self._ghost,
+            erase_ghost=self._erase_ghost,
+            status=status,
+            pinky_progress=pinky_prog,
+            cursor_norm=(nx, ny),
         )
 
     # ------------------------------------------------------------------
@@ -366,10 +364,10 @@ class BuilderController:
         oy = self.cc.iso_offset_y
         gz = self.current_layer
 
-        px  = int(nx * frame_w)
-        py  = int(ny * frame_h)
-        gx  = max(0, (px - gz * ox) // gs)
-        gy  = max(0, (py + gz * oy) // gs)
+        px = int(nx * frame_w)
+        py = int(ny * frame_h)
+        gx = max(0, (px - gz * ox) // gs)
+        gy = max(0, (py + gz * oy) // gs)
 
         if drag_start_norm and not self._dragging:
             spx = int(drag_start_norm[0] * frame_w)
@@ -395,7 +393,7 @@ class BuilderController:
                 if moved:
                     self._drag_origin_grid = (int(gx), int(gy), ogz)
                     if self._drag_group and self.world:
-                        ref     = self._drag_group[0]
+                        ref = self._drag_group[0]
                         new_ref = Cube(ref.gx + dgx, ref.gy + dgy, ref.gz)
                         self._drag_group = self.world.connected_group(new_ref)
                         self.world.selected_group = self._drag_group
@@ -418,7 +416,7 @@ class BuilderController:
           - Thumb+index dist change → zoom
         """
         cfg = self.cfg.opengl
-        ri  = gs.right_index_pos          # (nx, ny) normalised
+        ri = gs.right_index_pos          # (nx, ny) normalised
         tid = gs.right_thumb_index_dist   # normalised dist
 
         status = "LOCKED"
@@ -428,8 +426,8 @@ class BuilderController:
             dx = ri[0] - self._prev_right_index[0]
             dy = ri[1] - self._prev_right_index[1]
             if abs(dx) > 0.002 or abs(dy) > 0.002:
-                dyaw   =  dx * cfg.rotate_sensitivity * 180.0
-                dpitch =  dy * cfg.rotate_sensitivity * 180.0
+                dyaw = dx * cfg.rotate_sensitivity * 180.0
+                dpitch = dy * cfg.rotate_sensitivity * 180.0
                 if self.camera:
                     self.camera.rotate(dyaw, dpitch)
                 status = "ROTATING"
@@ -444,7 +442,7 @@ class BuilderController:
                     self.camera.zoom(zoom_delta)
                 status = "ZOOMING"
 
-        self._prev_right_index      = ri
+        self._prev_right_index = ri
         self._prev_thumb_index_dist = tid
         return status
 
@@ -453,8 +451,8 @@ class BuilderController:
     # ------------------------------------------------------------------
 
     def _stop_drag(self) -> None:
-        self._dragging         = False
-        self._drag_group       = []
+        self._dragging = False
+        self._drag_group = []
         self._drag_origin_grid = None
         if self.world:
             self.world.selected_group = []
@@ -469,6 +467,6 @@ class BuilderController:
         logger.info("Move mode -> %s", self.move_mode)
 
     @property
-    def ghost(self):       return self._ghost
+    def ghost(self): return self._ghost
     @property
     def erase_ghost(self): return self._erase_ghost

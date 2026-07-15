@@ -8,6 +8,8 @@ New gestures:
   SCROLL       : 3 fingertips       → scroll
 """
 from __future__ import annotations
+import ctypes
+import time
 
 import logging
 from enum import Enum, auto
@@ -22,8 +24,6 @@ from src.core.utils import OneEuroFilter
 
 logger = logging.getLogger(__name__)
 
-import time
-import ctypes
 
 # Win32 Mouse Constants
 MOUSEEVENTF_MOVE = 0x0001
@@ -35,7 +35,7 @@ MOUSEEVENTF_WHEEL = 0x0800
 
 
 class _DragState(Enum):
-    IDLE     = auto()
+    IDLE = auto()
     COUNTING = auto()
     DRAGGING = auto()
 
@@ -43,8 +43,8 @@ class _DragState(Enum):
 class MouseController:
     def __init__(self, cfg, shortcuts: ShortcutManager | None = None, responsive: bool = False) -> None:
         self.cfg = cfg
-        self.gc  = cfg.gesture
-        self.sc  = cfg.shortcuts
+        self.gc = cfg.gesture
+        self.sc = cfg.shortcuts
         self.shortcuts = shortcuts
         self.responsive = responsive
 
@@ -66,9 +66,9 @@ class MouseController:
         self._move_lockout:         int = 0  # frames to block clicks after THUMB_MOVE
 
         self._drag_state:      _DragState = _DragState.IDLE
-        self._drag_hold_count: int        = 0
-        self._drag_release_grace: int      = 0
-        self._click_start_time: float      = 0.0
+        self._drag_hold_count: int = 0
+        self._drag_release_grace: int = 0
+        self._click_start_time: float = 0.0
 
         self._prev_gesture: Gesture = Gesture.IDLE
 
@@ -84,18 +84,23 @@ class MouseController:
         self._frac_x: float = 0.0
         self._frac_y: float = 0.0
         self._last_move_time = 0.0
-        self._move_interval = 0.016 # ~60fps cap for mouse moves
+        self._move_interval = 0.016  # ~60fps cap for mouse moves
 
         logger.info("MouseController ready — screen %dx%d",
                     cfg.screen_w, cfg.screen_h)
 
     # ------------------------------------------------------------------
     def update(self, state: GestureState) -> str:
-        if self._left_click_cooldown  > 0: self._left_click_cooldown  -= 1
-        if self._right_click_cooldown > 0: self._right_click_cooldown -= 1
-        if self._scroll_cooldown      > 0: self._scroll_cooldown      -= 1
-        if self._shortcut_cooldown    > 0: self._shortcut_cooldown    -= 1
-        if self._move_lockout         > 0: self._move_lockout         -= 1
+        if self._left_click_cooldown > 0:
+            self._left_click_cooldown -= 1
+        if self._right_click_cooldown > 0:
+            self._right_click_cooldown -= 1
+        if self._scroll_cooldown > 0:
+            self._scroll_cooldown -= 1
+        if self._shortcut_cooldown > 0:
+            self._shortcut_cooldown -= 1
+        if self._move_lockout > 0:
+            self._move_lockout -= 1
 
         sx, sy = self._map_to_screen(state.cursor_x, state.cursor_y)
 
@@ -154,16 +159,16 @@ class MouseController:
 
     # ------------------------------------------------------------------
     def _map_to_screen(self, nx: float, ny: float) -> tuple[float, float]:
-        m  = self.gc.frame_margin
+        m = self.gc.frame_margin
         ax = max(m, min(1.0 - m, nx))
         ay = max(m, min(1.0 - m, ny))
         sx = (ax - m) / (1.0 - 2 * m) * self.cfg.screen_w
         sy = (ay - m) / (1.0 - 2 * m) * self.cfg.screen_h
-        
+
         # Clamp to prevent pyautogui.FailSafeException at screen corners (e.g. 0,0)
         sx = max(1.0, min(self.cfg.screen_w - 2.0, sx))
         sy = max(1.0, min(self.cfg.screen_h - 2.0, sy))
-        
+
         return sx, sy
 
     def _handle_move(self, tx: float, ty: float) -> None:
@@ -171,8 +176,8 @@ class MouseController:
         now = time.time()
         self._smooth_x = self._filter_x(tx, timestamp=now)
         self._smooth_y = self._filter_y(ty, timestamp=now)
-        
-        # The One Euro Filter already eliminates micro-jitter. 
+
+        # The One Euro Filter already eliminates micro-jitter.
         # Using a raw pixel threshold deadzone destroys slow, precise movements.
         # We always apply the filtered position for a 1-to-1 premium feel.
         ctypes.windll.user32.SetCursorPos(int(self._smooth_x), int(self._smooth_y))
@@ -183,7 +188,7 @@ class MouseController:
             pyautogui.click(button="left", _pause=False)
             self._left_click_cooldown = self.gc.pinch_cooldown_frames
             logger.debug("Single click triggered from short hold.")
-        
+
         elif self._drag_state == _DragState.DRAGGING:
             # Add a small grace period (e.g. 5 frames) to handle camera jitter
             self._drag_release_grace += 1
@@ -194,7 +199,7 @@ class MouseController:
             self._left_click_cooldown = self.gc.pinch_cooldown_frames
             logger.debug("Drag end (mouseUp).")
 
-        self._drag_state      = _DragState.IDLE
+        self._drag_state = _DragState.IDLE
         self._drag_hold_count = 0
         self._drag_release_grace = 0
         self._click_start_time = 0.0
@@ -258,28 +263,28 @@ class MouseController:
         """Handle relative movement from phone trackpad."""
         now = time.time()
         if now - self._last_move_time < self._move_interval:
-             return "RATE_LIMITED"
-        
+            return "RATE_LIMITED"
+
         # Dynamic sensitivity based on movement speed
         speed = (dx*dx + dy*dy)**0.5
-        boost = 1.0 + min(2.0, speed / 5.0) # Move faster when finger moves faster
+        boost = 1.0 + min(2.0, speed / 5.0)  # Move faster when finger moves faster
         # Use the explicit trackpad sensitivity setting
-        sens = self.gc.trackpad_sensitivity * boost 
-        
+        sens = self.gc.trackpad_sensitivity * boost
+
         self._frac_x += dx * sens
         self._frac_y += dy * sens
-        
+
         move_x = int(self._frac_x)
         move_y = int(self._frac_y)
-        
+
         self._frac_x -= move_x
         self._frac_y -= move_y
-        
+
         if move_x != 0 or move_y != 0:
             # Use direct Win32 call for relative movement
             ctypes.windll.user32.mouse_event(MOUSEEVENTF_MOVE, move_x, move_y, 0, 0)
             self._last_move_time = now
-            
+
         return "TOUCH MOVE"
 
     def handle_click(self, button: str = "left") -> str:
@@ -298,7 +303,7 @@ class MouseController:
             flag = MOUSEEVENTF_LEFTDOWN if is_down else MOUSEEVENTF_LEFTUP
         else:
             flag = MOUSEEVENTF_RIGHTDOWN if is_down else MOUSEEVENTF_RIGHTUP
-        
+
         ctypes.windll.user32.mouse_event(flag, 0, 0, 0, 0)
         return f"{button.upper()} {'DOWN' if is_down else 'UP'}"
 
@@ -326,12 +331,12 @@ class MouseController:
         """Handle multi-finger tap shortcuts from phone."""
         if not self.shortcuts:
             return "TOUCH SHORTCUT NO MANAGER"
-        
+
         # Maps slot 'touch_3_finger' to existing 'three_fingers' logic
         # or we can add new slots.
         logic_slot = {
             "touch_3_finger": "three_fingers",
-            "touch_4_finger": "four_fingers" # You can add four_fingers to shortcuts too
+            "touch_4_finger": "four_fingers"  # You can add four_fingers to shortcuts too
         }.get(slot, slot)
 
         result = self.shortcuts.trigger(logic_slot)
@@ -347,25 +352,25 @@ class MouseController:
                 "Tab": "tab",
                 "Escape": "esc"
             }
-            
+
             if key in special_keys:
                 pyautogui.press(special_keys[key])
                 return f"KEY PRESS: {key}"
-            
+
             # For everything else (especially Unicode/Emojis), use Clipboard Injection
             # This is much more reliable than pyautogui.typewrite on Windows
             old_clip = pyperclip.paste()
             pyperclip.copy(key)
             pyautogui.hotkey('ctrl', 'v')
-            
+
             # Restore clipboard in a background thread so we don't block the UI
             def restore():
-                time.sleep(0.5) # Wait for the paste to complete
+                time.sleep(0.5)  # Wait for the paste to complete
                 pyperclip.copy(old_clip)
-            
+
             threading.Thread(target=restore, daemon=True).start()
             return f"KEY TYPE: {key}"
-            
+
         except Exception as e:
             return f"KEY ERROR: {e}"
 

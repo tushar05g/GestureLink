@@ -97,7 +97,8 @@ class ShortcutConfig(BaseModel):
     hold_frames: int = Field(
         45, description="Frames a gesture must be held to trigger its shortcut."
     )
-    cooldown_frames: int = Field(25, description="Frames to wait before allowing the next shortcut launch.")
+    cooldown_frames: int = Field(
+        25, description="Frames to wait before allowing the next shortcut launch.")
 
 
 class OpenGLConfig(BaseModel):
@@ -107,15 +108,18 @@ class OpenGLConfig(BaseModel):
     cam_distance: float = Field(15.0, description="Initial camera distance from origin.")
     cam_distance_min: float = Field(3.0, description="Minimum zoom distance.")
     cam_distance_max: float = Field(60.0, description="Maximum zoom distance.")
-    rotate_sensitivity: float = Field(0.5, description="Degrees per normalised unit of hand movement.")
+    rotate_sensitivity: float = Field(
+        0.5, description="Degrees per normalised unit of hand movement.")
     zoom_sensitivity: float = Field(8.0, description="Zoom units per normalised pinch delta.")
     # Webcam PIP corner size
     pip_w: int = Field(240, description="Width of webcam picture-in-picture.")
     pip_h: int = Field(180, description="Height of webcam PIP.")
     # Fist detection threshold
-    fist_threshold: float = Field(0.06, description="Max avg fingertip-to-palm dist to detect fist.")
+    fist_threshold: float = Field(
+        0.06, description="Max avg fingertip-to-palm dist to detect fist.")
     # Thumb+index pinch for zoom
-    zoom_pinch_threshold: float = Field(0.08, description="Thumb-index dist considered 'touching' for zoom.")
+    zoom_pinch_threshold: float = Field(
+        0.08, description="Thumb-index dist considered 'touching' for zoom.")
 
 
 class CubeConfig(BaseModel):
@@ -124,18 +128,18 @@ class CubeConfig(BaseModel):
 
     # Neon cyan palette — brightness drops with depth
     # Each entry is (B, G, R) for OpenCV
-    layer_colors: list[tuple[int,int,int]] = [
+    layer_colors: list[tuple[int, int, int]] = [
         (255, 255,   0),   # layer 0 — nearest, brightest cyan
         (220, 220,   0),
         (185, 185,   0),
         (150, 150,   0),   # layer 3 — mid
         (115, 115,   0),
-        ( 80,  80,   0),
-        ( 50,  50,   0),   # layer 6 — farthest, darkest
+        (80,  80,   0),
+        (50,  50,   0),   # layer 6 — farthest, darkest
     ]
     ghost_alpha: float = Field(0.35, description="Opacity of ghost cube preview.")
-    selected_color: tuple[int,int,int] = (0, 255, 255)   # bright cyan for selected
-    erase_color:    tuple[int,int,int] = (0,   0, 255)   # red for erase brush
+    selected_color: tuple[int, int, int] = (0, 255, 255)   # bright cyan for selected
+    erase_color:    tuple[int, int, int] = (0,   0, 255)   # red for erase brush
 
     # Isometric projection offsets per depth layer (px shift right+up per layer)
     iso_offset_x: int = Field(6,  description="X offset per depth layer.")
@@ -148,7 +152,8 @@ class CubeConfig(BaseModel):
     toggle_btn_h: int = Field(60,  description="Height of toggle button.")
 
     # Paint / erase
-    paint_hold_frames: int = Field(3, description="Frames index+middle must be held before painting starts.")
+    paint_hold_frames: int = Field(
+        3, description="Frames index+middle must be held before painting starts.")
     max_undo: int = Field(20, description="Maximum undo history length.")
 
 

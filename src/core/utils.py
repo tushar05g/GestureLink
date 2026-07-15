@@ -1,13 +1,11 @@
 import math
 import os
 import sys
-import time
-import psutil
-import socket
 import ctypes
 from pathlib import Path
 
 _hub_mutex = None
+
 
 def get_lock(name="GestureLinkHub"):
     """Acquires a global named mutex to ensure only one instance of an app runs."""
@@ -37,9 +35,10 @@ def resource_path(relative_path: str) -> Path:
     else:
         # Running normally — resolve from project root (two levels above utils.py)
         base = Path(__file__).resolve().parent.parent.parent
-    
+
     res = base / relative_path
     return res
+
 
 def kill_process_on_port(port: int):
     """Kills any process currently using the specified TCP port."""
@@ -47,10 +46,12 @@ def kill_process_on_port(port: int):
         import psutil
         for conn in psutil.net_connections():
             if conn.laddr.port == port and conn.status == 'LISTEN':
-                if conn.pid is None or conn.pid < 10: continue
+                if conn.pid is None or conn.pid < 10:
+                    continue
                 try:
                     p = psutil.Process(conn.pid)
-                    print(f"[*] Port {port} is occupied by {p.name()} (PID: {conn.pid}). Cleaning up...")
+                    print(
+                        f"[*] Port {port} is occupied by {p.name()} (PID: {conn.pid}). Cleaning up...")
                     p.terminate()
                     try:
                         p.wait(timeout=2)
@@ -63,6 +64,7 @@ def kill_process_on_port(port: int):
     except Exception as e:
         print(f"[!] Error cleaning up port {port}: {e}")
 
+
 def kill_processes_by_name(name_list: list[str]):
     """Kills all processes whose names contain any of the strings in name_list."""
     try:
@@ -70,13 +72,16 @@ def kill_processes_by_name(name_list: list[str]):
         for proc in psutil.process_iter(['pid', 'name']):
             try:
                 # Never kill system processes
-                if proc.info['pid'] < 10: continue
-                
+                if proc.info['pid'] < 10:
+                    continue
+
                 for target in name_list:
                     if target.lower() in proc.info['name'].lower():
                         # Don't kill ourselves
-                        if proc.info['pid'] == os.getpid(): continue
-                        print(f"[*] Found conflicting process: {proc.info['name']} (PID: {proc.info['pid']}). Cleaning up...")
+                        if proc.info['pid'] == os.getpid():
+                            continue
+                        print(
+                            f"[*] Found conflicting process: {proc.info['name']} (PID: {proc.info['pid']}). Cleaning up...")
                         proc.terminate()
                         try:
                             proc.wait(timeout=2)
@@ -95,6 +100,7 @@ class OneEuroFilter:
     The One Euro Filter is a first-order low-pass filter with an adaptive cutoff frequency.
     It is specifically designed for low-latency signal filtering like cursor movement.
     """
+
     def __init__(self, freq, mincutoff=1.0, beta=0.007, dcutoff=1.0):
         self.freq = freq
         self.mincutoff = mincutoff
@@ -122,7 +128,7 @@ class OneEuroFilter:
 
         # Calculate velocity
         dx = (x - self.x_prev) * freq
-        
+
         # Filter velocity
         edx = self._low_pass_filter(dx, self.dx_prev, self._alpha(freq, self.dcutoff))
         self.dx_prev = edx
@@ -130,10 +136,10 @@ class OneEuroFilter:
         # Filter signal with adaptive cutoff based on velocity
         cutoff = self.mincutoff + self.beta * abs(edx)
         alpha = self._alpha(freq, cutoff)
-        
+
         filtered_x = self._low_pass_filter(x, self.x_prev, alpha)
         self.x_prev = filtered_x
-        
+
         return filtered_x
 
     def _alpha(self, freq, cutoff):

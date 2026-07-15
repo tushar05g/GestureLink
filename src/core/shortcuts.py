@@ -74,7 +74,8 @@ class ShortcutManager:
     def configure(self, slot: str, target: str, enabled: bool = True) -> None:
         if slot not in self._bindings:
             raise ValueError(f"Unknown shortcut slot: {slot}")
-        self._bindings[slot] = ShortcutBinding(enabled=enabled and bool(target.strip()), target=target.strip())
+        self._bindings[slot] = ShortcutBinding(
+            enabled=enabled and bool(target.strip()), target=target.strip())
         self.save()
 
     def get_bindings(self) -> dict[str, dict[str, object]]:
@@ -179,10 +180,13 @@ class ShortcutManager:
 
         style = ttk.Style(root)
         style.theme_use("clam")
-        style.configure("Title.TLabel", background="#101820", foreground="#7DF9FF", font=("Helvetica", 17, "bold"))
-        style.configure("Sub.TLabel", background="#101820", foreground="#D2E7F0", font=("Helvetica", 10))
+        style.configure("Title.TLabel", background="#101820",
+                        foreground="#7DF9FF", font=("Helvetica", 17, "bold"))
+        style.configure("Sub.TLabel", background="#101820",
+                        foreground="#D2E7F0", font=("Helvetica", 10))
         style.configure("Card.TLabelframe", background="#182838", foreground="#7DF9FF")
-        style.configure("Card.TLabelframe.Label", background="#182838", foreground="#7DF9FF", font=("Helvetica", 11, "bold"))
+        style.configure("Card.TLabelframe.Label", background="#182838",
+                        foreground="#7DF9FF", font=("Helvetica", 11, "bold"))
         style.configure("Action.TButton", font=("Helvetica", 10, "bold"))
 
         title = ttk.Label(root, text="GestureLink Shortcut Arena", style="Title.TLabel")
@@ -273,7 +277,8 @@ class ShortcutManager:
             manual_var = tk.StringVar(value=current.target if current.enabled else "")
             status_var = tk.StringVar(value="Status: ready")
 
-            current_match = next((d for d in discovered_display if display_to_target[d] == current.target), "")
+            current_match = next(
+                (d for d in discovered_display if display_to_target[d] == current.target), "")
             if current_match:
                 combo_var.set(current_match)
 
@@ -311,10 +316,12 @@ class ShortcutManager:
             manual_entry.grid(row=4, column=0, columnspan=2, sticky="we", padx=8, pady=4)
             manual_entry.bind("<KeyRelease>", lambda _e: _refresh_score())
 
-            browse_btn = ttk.Button(frame, text="Browse", style="Action.TButton", command=lambda s=slot: _browse_for_target(s))
+            browse_btn = ttk.Button(frame, text="Browse", style="Action.TButton",
+                                    command=lambda s=slot: _browse_for_target(s))
             browse_btn.grid(row=4, column=2, padx=8, sticky="e")
 
-            test_btn = ttk.Button(frame, text="Test", style="Action.TButton", command=lambda s=slot: _test_slot(s))
+            test_btn = ttk.Button(frame, text="Test", style="Action.TButton",
+                                  command=lambda s=slot: _test_slot(s))
             test_btn.grid(row=5, column=2, padx=8, pady=(2, 4), sticky="e")
 
             status_lbl = ttk.Label(frame, textvariable=status_var, style="Sub.TLabel")
@@ -331,7 +338,8 @@ class ShortcutManager:
                 row = slot_state[slot]
                 enabled = bool(row["enabled_var"].get())  # type: ignore[index]
                 target = _resolved_target(slot)
-                new_binding = ShortcutBinding(enabled=enabled and bool(target), target=target.strip())
+                new_binding = ShortcutBinding(
+                    enabled=enabled and bool(target), target=target.strip())
                 old_binding = self._bindings[slot]
                 if new_binding != old_binding:
                     self._bindings[slot] = new_binding
@@ -347,7 +355,8 @@ class ShortcutManager:
         btn_row = tk.Frame(root, bg="#101820")
         btn_row.pack(fill="x", pady=(6, 12), padx=16)
 
-        save_btn = ttk.Button(btn_row, text="Save Quests", style="Action.TButton", command=_save_and_close)
+        save_btn = ttk.Button(btn_row, text="Save Quests",
+                              style="Action.TButton", command=_save_and_close)
         save_btn.pack(side="left", padx=6)
 
         cancel_btn = ttk.Button(btn_row, text="Cancel", style="Action.TButton", command=_cancel)
@@ -497,7 +506,8 @@ class ShortcutManager:
     def _discover_windows_apps(self) -> list[DiscoveredApp]:
         import os
         roots = [
-            os.path.join(os.environ.get("PROGRAMDATA", "C:\\ProgramData"), "Microsoft\\Windows\\Start Menu\\Programs"),
+            os.path.join(os.environ.get("PROGRAMDATA", "C:\\ProgramData"),
+                         "Microsoft\\Windows\\Start Menu\\Programs"),
             os.path.join(os.environ.get("APPDATA", ""), "Microsoft\\Windows\\Start Menu\\Programs"),
             os.path.join(os.path.expanduser("~"), "Desktop"),
         ]

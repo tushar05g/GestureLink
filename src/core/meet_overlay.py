@@ -42,13 +42,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Win32 constants (ctypes — no pywin32 dependency required)
 # ---------------------------------------------------------------------------
-GWL_EXSTYLE       = -20
-WS_EX_LAYERED     = 0x00080000
+GWL_EXSTYLE = -20
+WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
-LWA_COLORKEY      = 0x00000001
-HWND_TOPMOST      = -1
-SWP_NOMOVE        = 0x0002
-SWP_NOSIZE        = 0x0001
+LWA_COLORKEY = 0x00000001
+HWND_TOPMOST = -1
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
 
 # Chroma-key colour: background pixels with this value become 100% transparent.
 # Using #010101 (near-black) instead of pure black so black ink still shows.
@@ -58,6 +58,7 @@ _CHROMA_WIN32 = 0x010101   # BGR in Win32 → R=0x01, G=0x01, B=0x01
 # ---------------------------------------------------------------------------
 # MeetOverlay
 # ---------------------------------------------------------------------------
+
 
 class MeetOverlay:
     """
@@ -82,8 +83,8 @@ class MeetOverlay:
         self._laser_ring_id: Optional[int] = None
 
         # Settings
-        self.color   = "#FF4757"   # default: red
-        self.size    = 4           # stroke width (px)
+        self.color = "#FF4757"   # default: red
+        self.size = 4           # stroke width (px)
         self._laser_r = 10         # laser dot radius
 
     # ------------------------------------------------------------------
@@ -230,10 +231,10 @@ class MeetOverlay:
     def _do_draw_stroke(self, sx: int, sy: int, color: str) -> None:
         if not self._canvas:
             return
-            
+
         if not hasattr(self, '_current_stroke_coords'):
             self._current_stroke_coords = []
-            
+
         if not self._current_stroke_ids:
             self._current_stroke_coords = [sx, sy]
             self._current_stroke_ids.append(-1)
@@ -272,7 +273,7 @@ class MeetOverlay:
         # Delete previous laser items
         self._do_clear_laser()
 
-        r  = self._laser_r
+        r = self._laser_r
         r2 = r + 6   # outer ring
 
         # Inner filled dot
@@ -303,8 +304,8 @@ class MeetOverlay:
         if not self._canvas or not self._all_stroke_ids:
             return
 
-        best_idx    = -1
-        best_dist   = float("inf")
+        best_idx = -1
+        best_dist = float("inf")
 
         for i, stroke in enumerate(self._all_stroke_ids):
             if not stroke:
@@ -320,7 +321,7 @@ class MeetOverlay:
             dist = math.hypot(cx - sx, cy - sy)
             if dist < best_dist:
                 best_dist = dist
-                best_idx  = i
+                best_idx = i
 
         if best_idx >= 0 and best_dist <= radius:
             for item_id in self._all_stroke_ids[best_idx]:
@@ -335,10 +336,10 @@ class MeetOverlay:
         if not self._canvas:
             return
         self._canvas.delete("all")
-        self._all_stroke_ids    = []
+        self._all_stroke_ids = []
         self._current_stroke_ids = []
-        self._laser_id          = None
-        self._laser_ring_id     = None
-        self._prev_x            = None
-        self._prev_y            = None
+        self._laser_id = None
+        self._laser_ring_id = None
+        self._prev_x = None
+        self._prev_y = None
         logger.info("MeetOverlay: canvas cleared.")

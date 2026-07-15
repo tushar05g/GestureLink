@@ -12,12 +12,11 @@ import time
 from typing import Optional
 
 import cv2
-import numpy as np
 
 from src.core.config import CONFIG
 from src.core.controller import MouseController
 from src.core.modes import AppMode, BuilderController
-from src.core.vision import Gesture, VisionProcessor
+from src.core.vision import VisionProcessor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,12 +26,12 @@ logging.basicConfig(
 logger = logging.getLogger("gesture_control.app")
 
 _HAND_CONNECTIONS = [
-    (0,1),(1,2),(2,3),(3,4),
-    (0,5),(5,6),(6,7),(7,8),
-    (0,9),(9,10),(10,11),(11,12),
-    (0,13),(13,14),(14,15),(15,16),
-    (0,17),(17,18),(18,19),(19,20),
-    (5,9),(9,13),(13,17),
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    (0, 9), (9, 10), (10, 11), (11, 12),
+    (0, 13), (13, 14), (14, 15), (15, 16),
+    (0, 17), (17, 18), (18, 19), (19, 20),
+    (5, 9), (9, 13), (13, 17),
 ]
 
 
@@ -77,18 +76,18 @@ def _draw_productivity_overlay(frame, vision, status, fps, cfg):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (120, 120, 120), 1, cv2.LINE_AA)
 
     # Mode badge
-    cv2.rectangle(frame_disp, (w//2-130, 8), (w//2+130, 48), (20,20,20), -1)
-    cv2.rectangle(frame_disp, (w//2-130, 8), (w//2+130, 48), (0,255,180), 1)
+    cv2.rectangle(frame_disp, (w//2-130, 8), (w//2+130, 48), (20, 20, 20), -1)
+    cv2.rectangle(frame_disp, (w//2-130, 8), (w//2+130, 48), (0, 255, 180), 1)
     cv2.putText(frame_disp, "PRODUCTIVITY MODE", (w//2-118, 34),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0,255,180), 2, cv2.LINE_AA)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 180), 2, cv2.LINE_AA)
 
     # Pinky progress
     pf = vision._pinky_hold_frames
     pr = vision._PINKY_HOLD_REQUIRED
     if pf > 0:
         bw = int((w - 20) * pf / pr)
-        cv2.rectangle(frame_disp, (10, 54), (w-10, 66), (40,40,40), -1)
-        cv2.rectangle(frame_disp, (10, 54), (10+bw, 66), (0,200,255), -1)
+        cv2.rectangle(frame_disp, (10, 54), (w-10, 66), (40, 40, 40), -1)
+        cv2.rectangle(frame_disp, (10, 54), (10+bw, 66), (0, 200, 255), -1)
 
     legend = [
         "[1] Thumb extended          ->  Move cursor",
@@ -100,7 +99,7 @@ def _draw_productivity_overlay(frame, vision, status, fps, cfg):
     for i, line in enumerate(legend):
         cv2.putText(frame_disp, line,
                     (12, h - 15 - (len(legend) - 1 - i) * 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150,150,150), 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1, cv2.LINE_AA)
 
     return frame_disp
 
@@ -111,8 +110,8 @@ def _draw_productivity_overlay(frame, vision, status, fps, cfg):
 
 def run() -> None:
     cfg = CONFIG
-    cc  = cfg.camera
-    oc  = cfg.overlay
+    cc = cfg.camera
+    oc = cfg.overlay
 
     logger.info("Starting Gesture Control")
 
@@ -125,11 +124,10 @@ def run() -> None:
         logger.error("Cannot open camera %d", cc.camera_index)
         sys.exit(1)
 
-    vision   = VisionProcessor(cfg)
-    mouse    = MouseController(cfg)
-    builder  = BuilderController(cfg)
-    mode     = AppMode.PRODUCTIVITY
-
+    vision = VisionProcessor(cfg)
+    mouse = MouseController(cfg)
+    builder = BuilderController(cfg)
+    mode = AppMode.PRODUCTIVITY
 
     # Thumb pinch drag state (Builder)
     _thumb_pinch_start: Optional[tuple] = None
@@ -158,7 +156,7 @@ def run() -> None:
                     builder.stop()
 
                 _thumb_pinch_start = None
-                _thumb_pinch_held  = False
+                _thumb_pinch_held = False
 
             # --- FPS ---
             now = time.perf_counter()
@@ -167,7 +165,7 @@ def run() -> None:
 
             # ---- Productivity Mode --------------------------------------
             if mode == AppMode.PRODUCTIVITY:
-                status     = mouse.update(gs)
+                status = mouse.update(gs)
                 frame_disp = _draw_productivity_overlay(frame, vision, status, fps, cfg)
                 cv2.imshow(oc.window_title, frame_disp)
                 key = cv2.waitKey(1) & 0xFF
@@ -187,7 +185,7 @@ def run() -> None:
                 if gs.thumb_pinch_active:
                     if not _thumb_pinch_held:
                         _thumb_pinch_start = (nx, ny)
-                        _thumb_pinch_held  = True
+                        _thumb_pinch_held = True
                     builder.handle_thumb_pinch_drag(
                         nx, ny, fw, fh,
                         drag_start_norm=_thumb_pinch_start,
@@ -200,7 +198,7 @@ def run() -> None:
                             drag_start_norm=_thumb_pinch_start,
                             is_dragging=False,
                         )
-                    _thumb_pinch_held  = False
+                    _thumb_pinch_held = False
                     _thumb_pinch_start = None
                     builder.update(
                         gs.gesture.value, nx, ny, fw, fh, gs

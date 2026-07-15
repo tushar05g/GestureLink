@@ -10,7 +10,6 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
 
 import threading
-import socket
 import pystray
 from pystray import MenuItem as item
 from PIL import Image, ImageDraw
@@ -23,6 +22,7 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
+
 def _start_shutdown_listener(on_shutdown):
     """
     Spawns a hidden Win32 window to receive WM_QUERYENDSESSION.
@@ -31,12 +31,14 @@ def _start_shutdown_listener(on_shutdown):
     close before overwriting files. Returning 1 signals 'ready to close';
     WM_ENDSESSION then fires on_shutdown() for a clean exit.
     """
-    import ctypes, ctypes.wintypes, threading
+    import ctypes
+    import ctypes.wintypes
+    import threading
 
-    user32   = ctypes.windll.user32
+    user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     WM_QUERYENDSESSION = 0x0011
-    WM_ENDSESSION      = 0x0016
+    WM_ENDSESSION = 0x0016
 
     WNDPROCTYPE = ctypes.WINFUNCTYPE(
         ctypes.c_long,
@@ -70,12 +72,12 @@ def _start_shutdown_listener(on_shutdown):
         ]
 
     def _run():
-        hinstance  = kernel32.GetModuleHandleW(None)
+        hinstance = kernel32.GetModuleHandleW(None)
         class_name = "GL_AgentShutdownWatcher"
         wc = WNDCLASSEX()
-        wc.cbSize        = ctypes.sizeof(WNDCLASSEX)
-        wc.lpfnWndProc   = _wnd_proc_ref
-        wc.hInstance     = hinstance
+        wc.cbSize = ctypes.sizeof(WNDCLASSEX)
+        wc.lpfnWndProc = _wnd_proc_ref
+        wc.hInstance = hinstance
         wc.lpszClassName = class_name
         user32.RegisterClassExW(ctypes.byref(wc))
         # Top-level hidden window (NOT message-only) so it receives the broadcast
@@ -100,16 +102,16 @@ class AgentTray:
         image = Image.new('RGBA', (width, height), color=(0, 0, 0, 0))
         dc = ImageDraw.Draw(image)
         # Agent color: Cyber Blue
-        main_color = (0, 162, 255, 255) 
-        
+        main_color = (0, 162, 255, 255)
+
         # Micro-Agent Icon (smaller palm + dots)
         dc.rounded_rectangle([20, 35, 44, 50], radius=4, fill=main_color)
-        dc.ellipse([20, 15, 28, 23], fill=main_color) # Dot 1
-        dc.ellipse([36, 15, 44, 23], fill=main_color) # Dot 2
-        
+        dc.ellipse([20, 15, 28, 23], fill=main_color)  # Dot 1
+        dc.ellipse([36, 15, 44, 23], fill=main_color)  # Dot 2
+
         # Signal Ring
         dc.ellipse([5, 5, 59, 59], outline=main_color, width=2)
-        
+
         bg = Image.new('RGBA', (width, height), color=(3, 7, 12, 255))
         return Image.alpha_composite(bg, image)
 
@@ -123,12 +125,12 @@ class AgentTray:
         from src.core.utils import resource_path
         cert = str(resource_path("cert.pem"))
         key = str(resource_path("key.pem"))
-        
+
         # Launch with SSL to allow HTTPS-based mobile control
         uvicorn.run(
-            app, 
-            host="0.0.0.0", 
-            port=self.port, 
+            app,
+            host="0.0.0.0",
+            port=self.port,
             log_level="info",
             ssl_keyfile=key,
             ssl_certfile=cert
@@ -138,7 +140,7 @@ class AgentTray:
         # --- Graceful shutdown: SIGTERM + Windows Restart Manager ---
         import signal
         signal.signal(signal.SIGTERM, lambda s, f: self.on_quit())
-        signal.signal(signal.SIGINT,  lambda s, f: self.on_quit())
+        signal.signal(signal.SIGINT, lambda s, f: self.on_quit())
         if sys.platform == "win32":
             _start_shutdown_listener(self.on_quit)
 
@@ -149,21 +151,21 @@ class AgentTray:
             item('Link Cloud Account...', self.open_cloud_link),
             item('Exit Agent', self.on_quit),
         )
-        
+
         self.icon = pystray.Icon(
             "GestureLinkAgent",
             self.create_icon_image(),
             "GestureLink Agent",
             menu
         )
-        
+
         # Check if already linked, if not open UI
         from src.agent.pairing_ui import load_agent_config
         config = load_agent_config()
         if not config.get("uid"):
             # open slightly delayed so tray has time to start
             threading.Timer(1.0, self.open_cloud_link).start()
-            
+
         self.icon.run()
 
     def open_cloud_link(self):
@@ -173,9 +175,10 @@ class AgentTray:
         # we launch pairing UI as a background process.
         multiprocessing.Process(target=start_pairing_ui, daemon=True).start()
 
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    
+
     if sys.platform == "win32":
         try:
             from src.core.utils import kill_process_on_port, kill_processes_by_name, get_lock
@@ -185,12 +188,13 @@ if __name__ == "__main__":
             if get_lock("GestureLinkAgent") == 183:
                 print("Agent already running. Exiting.")
                 sys.exit(1)
-        except Exception: pass
-    
+        except Exception:
+            pass
+
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
-    
+
     tray = AgentTray(port=args.port)
     tray.run()

@@ -22,24 +22,23 @@ Usage
 from __future__ import annotations
 
 import logging
-import math
 import threading
 import tkinter as tk
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.core.world import CubeWorld
+    pass
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Win32 constants (same as MeetOverlay, for always-on-top)
 # ---------------------------------------------------------------------------
-GWL_EXSTYLE   = -20
+GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x00080000
-HWND_TOPMOST  = -1
-SWP_NOMOVE    = 0x0002
-SWP_NOSIZE    = 0x0001
+HWND_TOPMOST = -1
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
 
 
 # ---------------------------------------------------------------------------
@@ -50,10 +49,10 @@ def _iso_cube_polys(px: int, py: int, gs: int):
     """Return (top, left, right) polygon point lists for an isometric cube
     whose top-left corner is at pixel (px, py) with grid size gs."""
     h = gs // 2
-    top   = [(px+gs//2, py),        (px+gs, py+h),
-             (px+gs//2, py+gs//2+h//2), (px, py+h)]
-    left  = [(px,       py+h),      (px+gs//2, py+gs//2+h//2),
-             (px+gs//2, py+gs),     (px, py+gs-h//2)]
+    top = [(px+gs//2, py),        (px+gs, py+h),
+           (px+gs//2, py+gs//2+h//2), (px, py+h)]
+    left = [(px,       py+h),      (px+gs//2, py+gs//2+h//2),
+            (px+gs//2, py+gs),     (px, py+gs-h//2)]
     right = [(px+gs//2, py+gs//2+h//2), (px+gs, py+h),
              (px+gs, py+gs-h//2),   (px+gs//2, py+gs)]
     return top, left, right
@@ -88,12 +87,12 @@ class BuilderOverlay:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
         cc = cfg.cube
-        self.grid_size    = cc.grid_size
-        self.iso_x        = cc.iso_offset_x
-        self.iso_y        = cc.iso_offset_y
-        self.num_layers   = cc.num_layers
+        self.grid_size = cc.grid_size
+        self.iso_x = cc.iso_offset_x
+        self.iso_y = cc.iso_offset_y
+        self.num_layers = cc.num_layers
 
-        self._root:   Optional[tk.Tk]     = None
+        self._root:   Optional[tk.Tk] = None
         self._canvas: Optional[tk.Canvas] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -195,13 +194,14 @@ class BuilderOverlay:
             logger.error("BuilderOverlay thread crashed: %s", e)
         finally:
             self._running = False
-            self._root    = None
-            self._canvas  = None
+            self._root = None
+            self._canvas = None
 
     def _apply_win32_topmost(self) -> None:
         """Force always-on-top via Win32 SetWindowPos."""
         try:
-            import sys, ctypes
+            import sys
+            import ctypes
             if sys.platform != "win32":
                 return
             hwnd = ctypes.windll.user32.GetParent(self._root.winfo_id())
@@ -229,15 +229,15 @@ class BuilderOverlay:
 
         canvas = self._canvas
         sw, sh = self._sw, self._sh
-        gs  = self.grid_size
-        ox  = self.iso_x
-        oy  = self.iso_y
-        world          = payload["world"]
-        ghost          = payload["ghost"]
-        erase_ghost    = payload["erase_ghost"]
-        status         = payload["status"]
+        gs = self.grid_size
+        ox = self.iso_x
+        oy = self.iso_y
+        world = payload["world"]
+        ghost = payload["ghost"]
+        erase_ghost = payload["erase_ghost"]
+        status = payload["status"]
         pinky_progress = payload["pinky_progress"]
-        cursor_norm    = payload["cursor_norm"]
+        cursor_norm = payload["cursor_norm"]
 
         # --- Clear previous frame ---
         canvas.delete("all")
@@ -291,11 +291,11 @@ class BuilderOverlay:
         if cursor_norm:
             cx = int(cursor_norm[0] * sw)
             cy = int(cursor_norm[1] * sh)
-            r  = 10
+            r = 10
             canvas.create_oval(cx-r, cy-r, cx+r, cy+r,
-                                fill="#00ff95", outline="#ffffff", width=2)
+                               fill="#00ff95", outline="#ffffff", width=2)
             canvas.create_oval(cx-(r+6), cy-(r+6), cx+(r+6), cy+(r+6),
-                                fill="", outline="#00ff95", width=2)
+                               fill="", outline="#00ff95", width=2)
 
         # --- HUD overlay ---
         self._draw_hud(canvas, sw, sh, status, pinky_progress)
@@ -312,12 +312,12 @@ class BuilderOverlay:
         """Draw one isometric cube at pixel position (px, py)."""
         top, left, right = _iso_cube_polys(px, py, gs)
 
-        top_color   = _shade(color, 1.4)
-        left_color  = color
+        top_color = _shade(color, 1.4)
+        left_color = color
         right_color = _shade(color, 0.6)
 
         outline_color = "#00ffcc" if selected else _shade(color, 0.35)
-        outline_w     = 2 if selected else 1
+        outline_w = 2 if selected else 1
 
         if ghost:
             # For ghost cubes draw as semi-transparent via stipple

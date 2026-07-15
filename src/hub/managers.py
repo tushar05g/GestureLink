@@ -1,14 +1,14 @@
-import asyncio
+from zeroconf import IPVersion, ServiceInfo, Zeroconf, ServiceBrowser, ServiceListener
 import json
 import logging
 import secrets
 import socket
 import uuid
-import random
 from pathlib import Path
 from typing import Dict, Set, Optional
 
 logger = logging.getLogger("gesture_control.remote")
+
 
 def detect_lan_ip(all_ips: bool = False) -> str | list[str]:
     # Allow manual override via .env
@@ -42,18 +42,19 @@ def detect_lan_ip(all_ips: bool = False) -> str | list[str]:
 
     # Filter to only LAN-likely ranges, deprioritize virtual/Docker (often 172.17.x.x)
     lan_ips = [ip for ip in found_ips if ip.startswith("192.168.") or ip.startswith("10.")]
-    
+
     # If no 192/10 found, look for 172 (but avoid 172.17 which is usually Docker)
     if not lan_ips:
         lan_ips = [ip for ip in found_ips if ip.startswith("172.")]
 
     if all_ips:
         return sorted(list(lan_ips if lan_ips else found_ips))
-    
+
     # Return the "best" one
     if lan_ips:
         return lan_ips[0]
     return next(iter(found_ips)) if found_ips else "127.0.0.1"
+
 
 class SecurityManager:
     def __init__(self, security_file: Path):
@@ -83,7 +84,8 @@ class SecurityManager:
                     data = json.load(f)
                     self.trusted_ips.update(data.get("trusted", []))
                     self.blocked_ips.update(data.get("blocked", []))
-                    logger.info("Loaded security: %d trusted, %d blocked", len(self.trusted_ips), len(self.blocked_ips))
+                    logger.info("Loaded security: %d trusted, %d blocked",
+                                len(self.trusted_ips), len(self.blocked_ips))
             except Exception as e:
                 logger.error("Failed to load security settings: %s", e)
 
@@ -117,9 +119,12 @@ class SecurityManager:
 
     async def request_consent(self, ip: str) -> bool:
         # Legacy/Handshake check
-        if ip in ("127.0.0.1", "localhost", "::1"): return True
-        if ip in self.blocked_ips: return False
+        if ip in ("127.0.0.1", "localhost", "::1"):
+            return True
+        if ip in self.blocked_ips:
+            return False
         return ip in self.trusted_ips
+
 
 class TokenManager:
     def __init__(self):
@@ -141,17 +146,18 @@ class TokenManager:
         return token
 
     def validate_token(self, token: Optional[str]) -> bool:
-        if not token: return False
-        if token == "hub_internal": return True
+        if not token:
+            return False
+        if token == "hub_internal":
+            return True
         return token in self.valid_tokens
 
-from zeroconf import IPVersion, ServiceInfo, Zeroconf, ServiceBrowser, ServiceListener
 
 class DeviceDiscovery(ServiceListener):
     def __init__(self, port: int):
         self.port = port
         self.zc = Zeroconf(ip_version=IPVersion.V4Only)
-        self.discovered_devices: Dict[str, str] = {} # ip -> hostname
+        self.discovered_devices: Dict[str, str] = {}  # ip -> hostname
         self.info: Optional[ServiceInfo] = None
         self.browser: Optional[ServiceBrowser] = None
 
@@ -181,6 +187,7 @@ class DeviceDiscovery(ServiceListener):
         self.browser = ServiceBrowser(self.zc, "_gesturelink._tcp.local.", self)
 
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None: pass
+
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         # Issue 9: remove agent from discovered list when it goes offline
         hostname = name.split(".")[0]
@@ -188,6 +195,7 @@ class DeviceDiscovery(ServiceListener):
         for ip in to_remove:
             del self.discovered_devices[ip]
             logger.info("Zeroconf: Agent offline: %s (%s)", hostname, ip)
+
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         info = zc.get_service_info(type_, name)
         if info and info.addresses:  # Bug #4: guard against empty addresses

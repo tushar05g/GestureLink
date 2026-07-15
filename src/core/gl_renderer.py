@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 try:
     from OpenGL.GL import *
     from OpenGL.GLU import *
-    import cv2
     _GL_AVAILABLE = True
 except ImportError:
     _GL_AVAILABLE = False
@@ -35,12 +34,12 @@ def _build_cube_data() -> tuple[np.ndarray, np.ndarray]:
     """Return (vertices+normals interleaved, indices) for a unit cube."""
     faces = [
         # (normal,  4 vertices)
-        (( 0, 0, 1), [(-0.5,-0.5, 0.5),( 0.5,-0.5, 0.5),( 0.5, 0.5, 0.5),(-0.5, 0.5, 0.5)]),
-        (( 0, 0,-1), [(-0.5,-0.5,-0.5),(-0.5, 0.5,-0.5),( 0.5, 0.5,-0.5),( 0.5,-0.5,-0.5)]),
-        (( 0, 1, 0), [(-0.5, 0.5,-0.5),(-0.5, 0.5, 0.5),( 0.5, 0.5, 0.5),( 0.5, 0.5,-0.5)]),
-        (( 0,-1, 0), [(-0.5,-0.5,-0.5),( 0.5,-0.5,-0.5),( 0.5,-0.5, 0.5),(-0.5,-0.5, 0.5)]),
-        (( 1, 0, 0), [( 0.5,-0.5,-0.5),( 0.5, 0.5,-0.5),( 0.5, 0.5, 0.5),( 0.5,-0.5, 0.5)]),
-        ((-1, 0, 0), [(-0.5,-0.5,-0.5),(-0.5,-0.5, 0.5),(-0.5, 0.5, 0.5),(-0.5, 0.5,-0.5)]),
+        ((0, 0, 1), [(-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5)]),
+        ((0, 0, -1), [(-0.5, -0.5, -0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (0.5, -0.5, -0.5)]),
+        ((0, 1, 0), [(-0.5, 0.5, -0.5), (-0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (0.5, 0.5, -0.5)]),
+        ((0, -1, 0), [(-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5)]),
+        ((1, 0, 0), [(0.5, -0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5), (0.5, -0.5, 0.5)]),
+        ((-1, 0, 0), [(-0.5, -0.5, -0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, 0.5), (-0.5, 0.5, -0.5)]),
     ]
     verts, indices = [], []
     vi = 0
@@ -63,11 +62,11 @@ class OrbitCamera:
         self.distance: float = cfg.opengl.cam_distance
         self.yaw:      float = 30.0
         self.pitch:    float = 25.0
-        self._min     = cfg.opengl.cam_distance_min
-        self._max     = cfg.opengl.cam_distance_max
+        self._min = cfg.opengl.cam_distance_min
+        self._max = cfg.opengl.cam_distance_max
 
     def rotate(self, dyaw: float, dpitch: float) -> None:
-        self.yaw   = (self.yaw + dyaw) % 360.0
+        self.yaw = (self.yaw + dyaw) % 360.0
         self.pitch = max(-89.0, min(89.0, self.pitch + dpitch))
 
     def zoom(self, delta: float) -> None:
@@ -94,33 +93,33 @@ _LAYER_COLORS = [
     (0.0, 0.20, 0.20),
 ]
 _SELECTED_COLOR = (1.0, 1.0, 0.0)
-_GHOST_COLOR    = (0.0, 0.8, 0.8)
-_ERASE_COLOR    = (1.0, 0.2, 0.2)
+_GHOST_COLOR = (0.0, 0.8, 0.8)
+_ERASE_COLOR = (1.0, 0.2, 0.2)
 
 
 class GLRenderer:
     def __init__(self, cfg, world) -> None:
-        self.cfg    = cfg
-        self.cc     = cfg.cube
+        self.cfg = cfg
+        self.cc = cfg.cube
         self.gl_cfg = cfg.opengl
-        self.world  = world
+        self.world = world
         self.camera = OrbitCamera(cfg)
 
         # VBO handles
-        self._vbo     = None
-        self._ebo     = None
-        self._n_idx   = 0
+        self._vbo = None
+        self._ebo = None
+        self._n_idx = 0
 
         # PIP texture
-        self._pip_tex   = None
-        self._pip_w     = cfg.opengl.pip_w
-        self._pip_h     = cfg.opengl.pip_h
-        self._pip_init  = False   # True after first upload
+        self._pip_tex = None
+        self._pip_w = cfg.opengl.pip_w
+        self._pip_h = cfg.opengl.pip_h
+        self._pip_init = False   # True after first upload
 
         # Overlay texture cache
-        self._overlay_tex      = None
-        self._overlay_status   = ""   # last status rendered
-        self._overlay_dirty    = True
+        self._overlay_tex = None
+        self._overlay_status = ""   # last status rendered
+        self._overlay_dirty = True
 
         self._vp_w = 0
         self._vp_h = 0
@@ -147,7 +146,7 @@ class GLRenderer:
 
         # Build VBO
         vdata, idata = _build_cube_data()
-        self._n_idx  = len(idata)
+        self._n_idx = len(idata)
 
         self._vbo = glGenBuffers(1)
         glBindBuffer(GL_ARRAY_BUFFER, self._vbo)
@@ -302,8 +301,8 @@ class GLRenderer:
     def _update_pip(self, frame_bgr: np.ndarray) -> None:
         """Upload webcam frame to PIP texture using glTexSubImage2D."""
         import cv2
-        pip     = cv2.resize(frame_bgr, (self._pip_w, self._pip_h))
-        pip     = cv2.flip(pip, 1)
+        pip = cv2.resize(frame_bgr, (self._pip_w, self._pip_h))
+        pip = cv2.flip(pip, 1)
         pip_rgb = cv2.cvtColor(pip, cv2.COLOR_BGR2RGB)
         pip_rgb = np.flipud(pip_rgb).copy()
 
@@ -327,10 +326,14 @@ class GLRenderer:
         glBindTexture(GL_TEXTURE_2D, self._pip_tex)
         glColor4f(1, 1, 1, 1)
         glBegin(GL_QUADS)
-        glTexCoord2f(0,0); glVertex2f(x,              y)
-        glTexCoord2f(1,0); glVertex2f(x+self._pip_w,  y)
-        glTexCoord2f(1,1); glVertex2f(x+self._pip_w,  y+self._pip_h)
-        glTexCoord2f(0,1); glVertex2f(x,              y+self._pip_h)
+        glTexCoord2f(0, 0)
+        glVertex2f(x,              y)
+        glTexCoord2f(1, 0)
+        glVertex2f(x+self._pip_w,  y)
+        glTexCoord2f(1, 1)
+        glVertex2f(x+self._pip_w,  y+self._pip_h)
+        glTexCoord2f(0, 1)
+        glVertex2f(x,              y+self._pip_h)
         glEnd()
         glDisable(GL_TEXTURE_2D)
 
@@ -359,16 +362,16 @@ class GLRenderer:
             img = np.zeros((self._vp_h, self._vp_w, 4), dtype=np.uint8)
 
             # Status badge
-            cv2.rectangle(img, (10,10), (280,55), (20,20,20,200), -1)
-            cv2.rectangle(img, (10,10), (280,55), (0,220,255,255), 1)
-            cv2.putText(img, f"Builder: {status}", (18,40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,220,255,255), 2, cv2.LINE_AA)
+            cv2.rectangle(img, (10, 10), (280, 55), (20, 20, 20, 200), -1)
+            cv2.rectangle(img, (10, 10), (280, 55), (0, 220, 255, 255), 1)
+            cv2.putText(img, f"Builder: {status}", (18, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 220, 255, 255), 2, cv2.LINE_AA)
 
             # Pinky progress
             if pinky_progress > 0:
                 bw = int((self._vp_w - 20) * pinky_progress)
-                cv2.rectangle(img, (10,62), (self._vp_w-10,74), (40,40,40,200), -1)
-                cv2.rectangle(img, (10,62), (10+bw,74), (0,200,255,255), -1)
+                cv2.rectangle(img, (10, 62), (self._vp_w-10, 74), (40, 40, 40, 200), -1)
+                cv2.rectangle(img, (10, 62), (10+bw, 74), (0, 200, 255, 255), -1)
 
             # Legend
             legend = [
@@ -386,7 +389,7 @@ class GLRenderer:
                 cv2.putText(img, line,
                             (12, h - 15 - (len(legend)-1-i)*20),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.38,
-                            (160,160,160,200), 1, cv2.LINE_AA)
+                            (160, 160, 160, 200), 1, cv2.LINE_AA)
 
             img_flip = np.flipud(img).copy()
             glBindTexture(GL_TEXTURE_2D, self._overlay_tex)
@@ -402,13 +405,17 @@ class GLRenderer:
         glEnable(GL_BLEND)
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self._overlay_tex)
-        glColor4f(1,1,1,1)
+        glColor4f(1, 1, 1, 1)
         w, h = self._vp_w, self._vp_h
         glBegin(GL_QUADS)
-        glTexCoord2f(0,0); glVertex2f(0,0)
-        glTexCoord2f(1,0); glVertex2f(w,0)
-        glTexCoord2f(1,1); glVertex2f(w,h)
-        glTexCoord2f(0,1); glVertex2f(0,h)
+        glTexCoord2f(0, 0)
+        glVertex2f(0, 0)
+        glTexCoord2f(1, 0)
+        glVertex2f(w, 0)
+        glTexCoord2f(1, 1)
+        glVertex2f(w, h)
+        glTexCoord2f(0, 1)
+        glVertex2f(0, h)
         glEnd()
         glDisable(GL_TEXTURE_2D)
         self._restore_3d_mode()

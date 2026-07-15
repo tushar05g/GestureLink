@@ -148,8 +148,10 @@ HTML = """
 </html>
 """
 
+
 def get_config_path():
     return os.path.join(os.path.expanduser("~"), ".gesturelink_agent.json")
+
 
 def load_agent_config():
     path = get_config_path()
@@ -161,10 +163,12 @@ def load_agent_config():
             return {}
     return {}
 
+
 def save_agent_config(uid, agent_id):
     path = get_config_path()
     with open(path, 'w') as f:
         json.dump({"uid": uid, "agent_id": agent_id}, f)
+
 
 class Api:
     def __init__(self, window):
@@ -175,16 +179,16 @@ class Api:
             req = urllib.request.Request(f"{FIREBASE_URL}/pairing_codes/{pin}.json")
             with urllib.request.urlopen(req, timeout=5) as response:
                 data = json.loads(response.read().decode())
-                
+
             if not data or 'uid' not in data:
                 return {"success": False, "error": "Invalid or expired pairing code."}
-            
+
             uid = data['uid']
-            
+
             # 1. Save config locally
             agent_id = str(uuid.uuid4())
             save_agent_config(uid, agent_id)
-            
+
             # 2. Register Agent in Firebase
             hostname = socket.gethostname()
             os_name = platform.system()
@@ -193,7 +197,7 @@ class Api:
                 "os": os_name,
                 "status": "online"
             }
-            
+
             req_put = urllib.request.Request(
                 f"{FIREBASE_URL}/users/{uid}/agents/{agent_id}.json",
                 data=json.dumps(agent_data).encode('utf-8'),
@@ -201,7 +205,7 @@ class Api:
             )
             with urllib.request.urlopen(req_put, timeout=5) as res2:
                 pass
-                
+
             # 3. Delete the pairing code (burn it)
             try:
                 req_del = urllib.request.Request(
@@ -211,7 +215,8 @@ class Api:
                 with urllib.request.urlopen(req_del, timeout=5) as res3:
                     pass
             except Exception as delete_error:
-                print(f"Could not delete pairing code (likely due to Firebase rules): {delete_error}")
+                print(
+                    f"Could not delete pairing code (likely due to Firebase rules): {delete_error}")
 
             return {"success": True}
 
@@ -220,6 +225,7 @@ class Api:
 
     def close_window(self):
         self.window.destroy()
+
 
 def start_pairing_ui():
     window = webview.create_window(
@@ -234,6 +240,7 @@ def start_pairing_ui():
     api = Api(window)
     window.expose(api.verify_pin, api.close_window)
     webview.start()
+
 
 if __name__ == '__main__':
     start_pairing_ui()

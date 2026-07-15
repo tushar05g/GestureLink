@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import socket
 import subprocess
 import sys
@@ -157,7 +156,7 @@ class BootstrapManager:
 
     def _start_agent_process(self, session: AgentSession) -> subprocess.Popen[Any]:
         repo_root = Path(__file__).resolve().parents[2]
-        
+
         cmd = [
             sys.executable,
             "-m",
@@ -175,7 +174,7 @@ class BootstrapManager:
         if sys.platform == "win32":
             import subprocess
             creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x00000200)
-            
+
         return subprocess.Popen(
             cmd,
             cwd=str(repo_root),
@@ -214,11 +213,11 @@ class BootstrapManager:
             t = threading.Thread(target=_dialog, daemon=True)
             t.start()
             t.join(timeout=60)
-            
+
             if result["allow"]:
                 # Trigger automatic installation
                 self._trigger_auto_install()
-                
+
             return bool(result["allow"])
         except Exception:
             logger.warning("Permission dialog unavailable; denying by default.")
@@ -235,7 +234,8 @@ class BootstrapManager:
                 if sys.platform == "win32":
                     import subprocess
                     creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x00000200)
-                subprocess.Popen([sys.executable, str(installer)], cwd=str(repo_root), creationflags=creationflags)
+                subprocess.Popen([sys.executable, str(installer)],
+                                 cwd=str(repo_root), creationflags=creationflags)
             except Exception as e:
                 logger.error("Failed to trigger auto-install: %s", e)
 

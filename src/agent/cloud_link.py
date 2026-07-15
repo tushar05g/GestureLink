@@ -13,8 +13,10 @@ FIREBASE_URL = "https://gesturelink-5db9c-default-rtdb.firebaseio.com"
 # Keep track of active PC
 _pc = None
 
+
 def get_config_path():
     return os.path.join(os.path.expanduser("~"), ".gesturelink_agent.json")
+
 
 def load_agent_config():
     path = get_config_path()
@@ -26,13 +28,14 @@ def load_agent_config():
             pass
     return {}
 
+
 async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
     global _pc
     if _pc:
         await _pc.close()
-        
+
     logging.info("Received WebRTC Offer from Hub.")
-    
+
     pc = RTCPeerConnection(configuration=RTCConfiguration(
         iceServers=[
             RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
@@ -40,15 +43,15 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
         ]
     ))
     _pc = pc
-    
+
     # Store accumulators
     pc.frac_x = 0.0
     pc.frac_y = 0.0
-    
+
     @pc.on("datachannel")
     def on_datachannel(channel):
         logging.info(f"Data channel {channel.label} established with Hub")
-        
+
         @channel.on("message")
         def on_message(message):
             if isinstance(message, str):
@@ -68,8 +71,10 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
                         pyautogui.click(button=data.get("button", "left"), _pause=False)
                     elif mtype in ("click_down", "click_up"):
                         is_down = (mtype == "click_down")
-                        if is_down: pyautogui.mouseDown(button=data.get("button", "left"), _pause=False)
-                        else: pyautogui.mouseUp(button=data.get("button", "left"), _pause=False)
+                        if is_down:
+                            pyautogui.mouseDown(button=data.get("button", "left"), _pause=False)
+                        else:
+                            pyautogui.mouseUp(button=data.get("button", "left"), _pause=False)
                     elif mtype == "scroll":
                         pyautogui.scroll(-int(float(data.get("dy", 0)) * 20), _pause=False)
                     elif mtype == "zoom":
@@ -78,10 +83,12 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
                         pass
                     elif mtype == "key":
                         key = data.get("key")
-                        if key: pyautogui.press(key, _pause=False)
+                        if key:
+                            pyautogui.press(key, _pause=False)
                     elif mtype == "hotkey":
                         keys = data.get("keys", [])
-                        if keys: pyautogui.hotkey(*keys, _pause=False)
+                        if keys:
+                            pyautogui.hotkey(*keys, _pause=False)
                     # New: Absolute positioning support from Hub VisionWorker
                     elif mtype == "absolute_move":
                         x, y = data.get("x"), data.get("y")
@@ -107,13 +114,13 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
     await pc.setRemoteDescription(offer)
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    
+
     # Send answer back via Firebase
     answer_data = {
         "sdp": pc.localDescription.sdp,
         "type": pc.localDescription.type
     }
-    
+
     try:
         import urllib.request
         req = urllib.request.Request(
@@ -131,14 +138,14 @@ async def cloud_listener_loop(mouse):
     config = load_agent_config()
     uid = config.get("uid")
     agent_id = config.get("agent_id")
-    
+
     if not uid or not agent_id:
         logging.info("No cloud agent config found. Skipping cloud listener.")
         return
-        
+
     url = f"{FIREBASE_URL}/users/{uid}/agents/{agent_id}/signaling.json"
     logging.info(f"Starting cloud listener for Agent {agent_id}")
-    
+
     while True:
         try:
             async with httpx.AsyncClient(timeout=None) as client:
@@ -153,12 +160,13 @@ async def cloud_listener_loop(mouse):
                                     payload = {"hub_offer": data.get("data")}
                                 else:
                                     continue
-                                    
+
                                 if payload and "hub_offer" in payload and payload["hub_offer"]:
                                     offer = payload["hub_offer"]
                                     # Handle in background
-                                    asyncio.create_task(handle_webrtc_offer(offer, uid, agent_id, mouse))
-                                    
+                                    asyncio.create_task(handle_webrtc_offer(
+                                        offer, uid, agent_id, mouse))
+
                                     # Delete the offer so we don't process it again
                                     req_del = urllib.request.Request(
                                         f"{FIREBASE_URL}/users/{uid}/agents/{agent_id}/signaling/hub_offer.json",

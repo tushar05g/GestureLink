@@ -1,3 +1,9 @@
+import uvicorn
+from pystray import MenuItem as item
+import pystray
+from PIL import Image, ImageDraw
+import signal
+import threading
 import multiprocessing
 import sys
 import os
@@ -6,26 +12,27 @@ _hub_mutex = None
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    
+
     if sys.platform == "win32":
         try:
             from src.core.utils import kill_process_on_port, kill_processes_by_name, get_lock
-            
+
             # Use the robust cleanup logic
             kill_process_on_port(8000)
             kill_processes_by_name(["cloudflared", "GestureLink_Hub"])
-            
+
             # Use HTTPS if certificates are found, otherwise fallback to HTTP
             from src.core.utils import resource_path
             local_proto = "https" if resource_path("cert.pem").exists() else "http"
-            
+
             # Double-check lock acquisition
             err = get_lock()
             if err == 183:
                 print("!!! Warning: Another instance is still holding the lock. Please check Task Manager.")
                 sys.exit(1)
             else:
-                if _hub_mutex: print("DEBUG: Hub lock acquired.")
+                if _hub_mutex:
+                    print("DEBUG: Hub lock acquired.")
         except Exception:
             import traceback
             traceback.print_exc()
@@ -36,19 +43,11 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
-import threading
-import webbrowser
-import socket
-import signal
-from pathlib import Path
-from PIL import Image, ImageDraw
-import pystray
-from pystray import MenuItem as item
 
 # Heavy imports deferred to avoid module double-load errors in subprocesses
 # from src.hub.server import build_app
 # from src.hub.managers import detect_lan_ip
-import uvicorn
+
 
 def _start_shutdown_listener(on_shutdown):
     """
@@ -58,17 +57,20 @@ def _start_shutdown_listener(on_shutdown):
     close before overwriting files. Returning 1 signals 'ready to close';
     WM_ENDSESSION then fires on_shutdown() for a clean exit.
     """
-    import ctypes, ctypes.wintypes, threading
+    import ctypes
+    import ctypes.wintypes
+    import threading
 
-    user32   = ctypes.windll.user32
+    user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     WM_QUERYENDSESSION = 0x0011
-    WM_ENDSESSION      = 0x0016
-    
+    WM_ENDSESSION = 0x0016
+
     # Define argument and return types correctly for 64-bit Windows
     # LPARAM and WPARAM are pointer-sized (64-bit on x64)
-    user32.DefWindowProcW.argtypes = [ctypes.wintypes.HWND, ctypes.c_uint, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM]
-    user32.DefWindowProcW.restype = ctypes.wintypes.LPARAM # LRESULT is pointer-sized
+    user32.DefWindowProcW.argtypes = [ctypes.wintypes.HWND,
+                                      ctypes.c_uint, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.wintypes.LPARAM  # LRESULT is pointer-sized
 
     WNDPROCTYPE = ctypes.WINFUNCTYPE(
         ctypes.wintypes.LPARAM,
@@ -102,12 +104,12 @@ def _start_shutdown_listener(on_shutdown):
         ]
 
     def _run():
-        hinstance  = kernel32.GetModuleHandleW(None)
+        hinstance = kernel32.GetModuleHandleW(None)
         class_name = "GL_HubShutdownWatcher"
         wc = WNDCLASSEX()
-        wc.cbSize        = ctypes.sizeof(WNDCLASSEX)
-        wc.lpfnWndProc   = _wnd_proc_ref
-        wc.hInstance     = hinstance
+        wc.cbSize = ctypes.sizeof(WNDCLASSEX)
+        wc.lpfnWndProc = _wnd_proc_ref
+        wc.hInstance = hinstance
         wc.lpszClassName = class_name
         user32.RegisterClassExW(ctypes.byref(wc))
         # Top-level hidden window (NOT message-only) so it receives the broadcast
@@ -136,22 +138,22 @@ class GestureLinkTray:
         height = 64
         image = Image.new('RGBA', (width, height), color=(0, 0, 0, 0))
         dc = ImageDraw.Draw(image)
-        main_color = (0, 255, 149, 255) # Neon Mint
-        
+        main_color = (0, 255, 149, 255)  # Neon Mint
+
         # Palm
         dc.rounded_rectangle([15, 40, 49, 55], radius=5, fill=main_color)
         # Fingers
-        dc.rounded_rectangle([15, 20, 21, 37], radius=2, fill=main_color) # Index
-        dc.rounded_rectangle([24, 12, 30, 37], radius=2, fill=main_color) # Middle
-        dc.rounded_rectangle([33, 15, 39, 37], radius=2, fill=main_color) # Ring
-        dc.rounded_rectangle([42, 25, 48, 37], radius=2, fill=main_color) # Pinky
+        dc.rounded_rectangle([15, 20, 21, 37], radius=2, fill=main_color)  # Index
+        dc.rounded_rectangle([24, 12, 30, 37], radius=2, fill=main_color)  # Middle
+        dc.rounded_rectangle([33, 15, 39, 37], radius=2, fill=main_color)  # Ring
+        dc.rounded_rectangle([42, 25, 48, 37], radius=2, fill=main_color)  # Pinky
         # Thumb
         dc.rounded_rectangle([5, 37, 12, 45], radius=2, fill=main_color)
-        
+
         # Signal Arcs
         dc.arc([2, 2, 61, 61], start=210, end=330, fill=main_color, width=2)
         dc.arc([10, 10, 54, 54], start=210, end=330, fill=main_color, width=1)
-        
+
         # Background Circle for contrast in tray
         bg = Image.new('RGBA', (width, height), color=(3, 7, 12, 255))
         final = Image.alpha_composite(bg, image)
@@ -161,10 +163,10 @@ class GestureLinkTray:
         from src.core.utils import resource_path
         import subprocess
         import sys
-        
+
         proto = "https" if resource_path("cert.pem").exists() else "http"
         url = f"{proto}://localhost:{self.port}/hub"
-        
+
         # Launch pywebview in a separate background process
         try:
             if hasattr(sys, 'frozen'):
@@ -231,7 +233,7 @@ class GestureLinkTray:
         else:
             ssl_params = {}
             print("[*] Local SSL disabled (HTTP mode).")
-        
+
         uvicorn.run(
             "src.hub.server:build_app",
             factory=True,
@@ -243,7 +245,7 @@ class GestureLinkTray:
     def run(self):
         # --- Graceful shutdown: SIGTERM + Windows Restart Manager ---
         signal.signal(signal.SIGTERM, lambda s, f: self.on_quit())
-        signal.signal(signal.SIGINT,  lambda s, f: self.on_quit())
+        signal.signal(signal.SIGINT, lambda s, f: self.on_quit())
         if sys.platform == "win32":
             _start_shutdown_listener(self.on_quit)
 
@@ -257,18 +259,19 @@ class GestureLinkTray:
             item('Copy Hub IP', self.on_copy_ip),
             item('Exit', self.on_quit),
         )
-        
+
         self.icon = pystray.Icon(
             "GestureLink",
             self.create_icon_image(),
             "GestureLink Hub",
             menu
         )
-        
+
         from src.hub.managers import detect_lan_ip
         print(f"GestureLink Hub running on http://{detect_lan_ip()}:{self.port}")
         print("Tray icon active. Access the dashboard via the taskbar.")
         self.icon.run()
+
 
 if __name__ == "__main__":
     import sys
@@ -277,36 +280,36 @@ if __name__ == "__main__":
         try:
             url_idx = sys.argv.index("--webview") + 1
             url = sys.argv[url_idx]
-            
+
             import webview
-            
+
             # Try to resolve an icon if we are running locally or built
             import os
             icon_path = None
             possible_icons = [
                 "src/hub/static/icon.ico",
-                "icon.ico", 
+                "icon.ico",
                 "../src/hub/static/icon.ico"
             ]
             for p in possible_icons:
                 if os.path.exists(p):
                     icon_path = p
                     break
-                    
+
             window = webview.create_window(
-                'GestureLink Hub', 
+                'GestureLink Hub',
                 url,
                 width=1100,
                 height=750,
                 min_size=(800, 600),
-                background_color='#0f172a' # Match our dark theme
+                background_color='#0f172a'  # Match our dark theme
             )
             webview.start(private_mode=False)
             sys.exit(0)
         except Exception as e:
             print("Error launching webview:", e)
             sys.exit(1)
-            
+
     # Otherwise, run normal tray
     tray = GestureLinkTray()
     tray.run()

@@ -16,13 +16,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 import uvicorn
 from zeroconf import IPVersion, ServiceInfo, Zeroconf
 import argparse
-import multiprocessing
 import platform
 from src.core.vision_worker import AsyncVisionWorker
 import cv2
-import numpy as np
 from src.core.config import CONFIG
-from src.core.vision import VisionProcessor
 from src.core.controller import MouseController
 
 logging.basicConfig(level=logging.INFO)
@@ -36,9 +33,10 @@ camera_task = None
 vision = None
 mouse = None
 
+
 def _detect_lan_ips() -> list[str]:
     """Return real LAN IPs, excluding VMware/Hyper-V virtual adapters.
-    
+
     Strategy: Use the route-based getsockname() trick as primary source —
     it picks the ACTUAL outbound interface (Wi-Fi / Ethernet), never VMnet.
     gethostbyname_ex() is avoided because it returns ALL adapters including
@@ -53,7 +51,7 @@ def _detect_lan_ips() -> list[str]:
                 found.append(ip)
     except OSError:
         pass
-    
+
     if not found:
         # Fallback: enumerate adapters but skip obvious virtual ranges
         VIRTUAL_PREFIXES = ("192.168.56.", "192.168.234.", "192.168.100.")
@@ -64,17 +62,20 @@ def _detect_lan_ips() -> list[str]:
                     found.append(ip)
         except Exception:
             pass
-    
+
     return found if found else ["127.0.0.1"]
+
 
 def _detect_lan_ip() -> str:
     """Return a single best-guess LAN IP."""
     ips = _detect_lan_ips()
     return ips[0] if ips else "127.0.0.1"
 
+
 @app.get("/api/ping")
 async def ping():
     return {"ok": True, "hostname": socket.gethostname(), "ip": _detect_lan_ip()}
+
 
 @app.get("/api/agent/info")
 async def agent_info():
@@ -89,6 +90,7 @@ async def agent_info():
         "camera_active": camera_active,
         "camera_status": status
     }
+
 
 @app.post("/api/security/fix-firewall")
 async def fix_firewall():
@@ -118,18 +120,21 @@ async def fix_firewall():
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+
 @app.get("/api/apps")
 async def get_apps():
     from src.core.shortcuts import ShortcutManager
     sm = ShortcutManager()
     return {"apps": sm.get_available_apps()}
 
+
 @app.get("/api/settings")
 async def get_settings():
     return {
-        "sensitivity": int(CONFIG.gesture.trackpad_sensitivity * 33.3), # Map 1.5 to ~50
+        "sensitivity": int(CONFIG.gesture.trackpad_sensitivity * 33.3),  # Map 1.5 to ~50
         "trackpad_sensitivity": CONFIG.gesture.trackpad_sensitivity
     }
+
 
 @app.post("/api/settings")
 async def set_settings(payload: dict):
@@ -139,9 +144,10 @@ async def set_settings(payload: dict):
         CONFIG.gesture.trackpad_sensitivity = 0.5 + (val / 100.0) * 2.5
     elif "trackpad_sensitivity" in payload:
         CONFIG.gesture.trackpad_sensitivity = float(payload["trackpad_sensitivity"])
-    
+
     logging.info(f"Agent sensitivity updated to: {CONFIG.gesture.trackpad_sensitivity}")
     return {"ok": True, "trackpad_sensitivity": CONFIG.gesture.trackpad_sensitivity}
+
 
 async def _camera_loop():
     global camera_active, camera_initialized, vision, mouse
@@ -156,20 +162,20 @@ async def _camera_loop():
             if not ret:
                 await asyncio.sleep(0.01)
                 continue
-            
+
             # Mirror the frame so cursor movement matches hand direction.
             # Without this, lm[8].x increases left-to-right in the RAW frame,
             # but the physical hand appears mirrored → cursor moves opposite.
             # The Hub does the same flip in _hub_camera_loop().
             frame = cv2.flip(frame, 1)
-            
+
             # Process frame via AsyncVisionWorker
             # Returns tuple: (GestureState, annotated_bytes) or None
             result = await vision.process_frame(frame)
             if result:
                 state, _ = result
                 mouse.update(state)
-            
+
             # Small sleep to yield to event loop
             await asyncio.sleep(0.01)
     except Exception as e:
@@ -179,11 +185,12 @@ async def _camera_loop():
             cap.release()
         camera_initialized = False
 
+
 @app.post("/api/camera/toggle")
 async def toggle_camera(payload: dict):
     global camera_active, camera_task, vision, mouse
     active = payload.get("active", False)
-    
+
     if active and not camera_active:
         camera_active = True
         if not vision:
@@ -199,8 +206,9 @@ async def toggle_camera(payload: dict):
             await camera_task
             camera_task = None
         logging.info("Agent camera turned OFF")
-    
+
     return {"ok": True, "active": camera_active}
+
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
@@ -213,18 +221,18 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
         # If no secret set, we still expect hub_internal for relay
         # or we could allow anything, but hub_internal is safer
         pass
-    
+
     await ws.accept()
     logging.info("Connected to controller")
-    
+
     # Accumulators for sub-pixel trackpad movements
     frac_x = 0.0
     frac_y = 0.0
-    
+
     global mouse
     if mouse is None:
         mouse = MouseController(CONFIG, responsive=True)
-    
+
     try:
         while True:
             msg = await ws.receive()
@@ -245,8 +253,10 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
                         pyautogui.click(button=data.get("button", "left"), _pause=False)
                     elif mtype in ("click_down", "click_up"):
                         is_down = (mtype == "click_down")
-                        if is_down: pyautogui.mouseDown(button=data.get("button", "left"), _pause=False)
-                        else: pyautogui.mouseUp(button=data.get("button", "left"), _pause=False)
+                        if is_down:
+                            pyautogui.mouseDown(button=data.get("button", "left"), _pause=False)
+                        else:
+                            pyautogui.mouseUp(button=data.get("button", "left"), _pause=False)
                     elif mtype == "scroll":
                         dy = float(data.get("dy", 0))
                         pyautogui.scroll(int(dy * -2), _pause=False)
@@ -261,14 +271,17 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(None)):
                         mouse.handle_touch_shortcut(slot)
                     elif mtype == "key":
                         key = data.get("key")
-                        if key: mouse.handle_key(key)
+                        if key:
+                            mouse.handle_key(key)
                     elif mtype == "hotkey":
                         keys = data.get("keys", [])
-                        if keys: mouse.handle_hotkey(keys)
+                        if keys:
+                            mouse.handle_hotkey(keys)
                 except Exception as e:
                     logging.warning(f"Error processing command: {e}")
     except WebSocketDisconnect:
         logging.info("Controller disconnected")
+
 
 @app.on_event("startup")
 async def startup():
@@ -282,7 +295,7 @@ async def startup():
                 "_gesturelink._tcp.local.",
                 f"GestureLink-Agent-{hostname}._gesturelink._tcp.local.",
                 addresses=[socket.inet_aton(ip) for ip in ips],
-                port=8001, # Default to 8001 to avoid Hub conflict
+                port=8001,  # Default to 8001 to avoid Hub conflict
                 properties={"type": "agent", "version": "1.0.0"},
                 server=f"{hostname}.local.",
             )
@@ -304,10 +317,12 @@ async def startup():
         mouse = MouseController(CONFIG, responsive=True)
     asyncio.create_task(cloud_listener_loop(mouse))
 
+
 @app.on_event("shutdown")
 async def shutdown():
     if hasattr(app.state, "zc"):
         loop = asyncio.get_event_loop()
+
         def unregister():
             try:
                 app.state.zc.unregister_service(app.state.zc_info)
@@ -321,6 +336,6 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--secret", type=str, default="")
     args = parser.parse_args()
-    
+
     SECRET_TOKEN = args.secret
     uvicorn.run(app, host="0.0.0.0", port=args.port)

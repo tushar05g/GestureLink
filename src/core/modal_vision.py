@@ -25,7 +25,6 @@ Usage
 """
 from __future__ import annotations
 
-import base64
 import logging
 import os
 
@@ -55,7 +54,8 @@ try:
         @modal.enter()
         def setup(self):
             import mediapipe as mp
-            import urllib.request, os
+            import urllib.request
+            import os
 
             model_url = (
                 "https://storage.googleapis.com/mediapipe-models/"
@@ -73,16 +73,16 @@ try:
                 min_hand_presence_confidence=0.65,
                 min_tracking_confidence=0.6,
             )
-            self._landmarker   = mp.tasks.vision.HandLandmarker.create_from_options(options)
+            self._landmarker = mp.tasks.vision.HandLandmarker.create_from_options(options)
             self._mp_image_cls = mp.Image
-            self._mp_format    = mp.ImageFormat.SRGB
+            self._mp_format = mp.ImageFormat.SRGB
 
         def _detect_logic(self, jpeg_bytes: bytes) -> dict:
             """Core MediaPipe logic"""
             import cv2
             import numpy as np
 
-            arr       = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
             frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
@@ -107,19 +107,19 @@ try:
         @modal.asgi_app()
         def web_api(self):
             import fastapi
-            
+
             web_app = fastapi.FastAPI()
-            
+
             @web_app.post("/detect")
             async def detect_endpoint(request: fastapi.Request):
                 # Verify API Key
                 api_key = request.headers.get("X-API-Key")
                 if api_key != "gesturelink_vision_api_secret_key":
                     return fastapi.Response(status_code=403, content="Invalid API Key")
-                
+
                 body = await request.body()
                 return self._detect_logic(body)
-                
+
             return web_app
 
 except ImportError:
@@ -135,16 +135,17 @@ class ModalVisionClient:
     Wraps the remote Web API.
     Uses standard httpx so it works flawlessly on any end-user machine without Modal login.
     """
+
     def __init__(self):
         import httpx
         self.api_url = os.environ.get("MODAL_API_URL")
         if not self.api_url:
             raise ValueError("MODAL_API_URL not set in .env")
-            
+
         # Ensure we hit the correct /detect endpoint
         self.api_url = self.api_url.rstrip("/") + "/detect"
         self.api_key = os.environ.get("MODAL_API_KEY", "gesturelink_vision_api_secret_key")
-        
+
         # Async HTTP client
         self.client = httpx.AsyncClient()
         self._busy = False
@@ -153,17 +154,17 @@ class ModalVisionClient:
     async def detect(self, frame_bgr) -> dict:
         import cv2
         import asyncio
-        
+
         if self._busy:
             # Fallback if we are already waiting for a previous frame
             return {"hands": []}
-            
+
         self._busy = True
         try:
             _, buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            
+
             res = await self.client.post(
-                self.api_url, 
+                self.api_url,
                 content=buf.tobytes(),
                 headers={"X-API-Key": self.api_key},
                 timeout=0.5
@@ -173,7 +174,7 @@ class ModalVisionClient:
             else:
                 logger.warning(f"Modal API Error: {res.status_code}")
                 return {"hands": []}
-                
+
         except asyncio.TimeoutError:
             logger.warning("Modal taking >500ms, using local MediaPipe fallback.")
             return {"hands": []}
@@ -187,6 +188,7 @@ class ModalVisionClient:
 # Factory — returns Modal client or None
 # ---------------------------------------------------------------------------
 
+
 def get_modal_client():
     """
     Returns a ModalVisionClient if enabled in .env, else None.
@@ -194,7 +196,7 @@ def get_modal_client():
     use_modal = os.environ.get("USE_MODAL", "false").lower() == "true"
     if not use_modal:
         return None
-        
+
     try:
         client = ModalVisionClient()
         return client

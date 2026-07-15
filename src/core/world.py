@@ -91,9 +91,9 @@ class CubeWorld:
     @staticmethod
     def _neighbours(c: Cube):
         for dx, dy, dz in [
-            (1,0,0),(-1,0,0),
-            (0,1,0),(0,-1,0),
-            (0,0,1),(0,0,-1),
+            (1, 0, 0), (-1, 0, 0),
+            (0, 1, 0), (0, -1, 0),
+            (0, 0, 1), (0, 0, -1),
         ]:
             yield Cube(c.gx+dx, c.gy+dy, c.gz+dz)
 
