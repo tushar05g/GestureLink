@@ -128,7 +128,7 @@ async function init() {
     const scannerPage = document.getElementById('scannerPage')!;
     scannerPage.classList.add('hidden');
     pairingOverlay.style.display = 'flex';
-    pairStatusText.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Verifying PIN...';
+    pairStatusText.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Connecting to PC...';
     await autoPair(autoPin);
     authToken = localStorage.getItem("gesturelink_token");
     if (!authToken || authToken === "undefined") {
@@ -430,6 +430,13 @@ globalThis.connectToPC = async (i: number) => {
   const targetParam = isHubSelfTarget(d.ip, d.hostname) ? "" : `&target=${encodeURIComponent(d.ip)}`;
   const wsUrl = `${proto}//${new URL(HUB_BASE_URL).host}/ws?token=${authToken}${targetParam}`;
 
+  if (authToken === "firebase-webrtc-only") {
+    console.log("Firebase-only mode detected. Bypassing WebSocket...");
+    activatePC(d);
+    initWebRTC(true);
+    return;
+  }
+
   console.log(`[DEBUG] Connecting to device #${i}:`, {
     hostname: d.hostname,
     ip: d.ip,
@@ -444,7 +451,28 @@ globalThis.connectToPC = async (i: number) => {
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
+    let fallbackTriggered = false;
+    const triggerFallback = () => {
+      if (fallbackTriggered) return;
+      fallbackTriggered = true;
+      console.log("WebSocket failed or timed out. Falling back to Firebase WebRTC signaling.");
+      if (connectBtn) {
+        connectBtn.textContent = 'Connect';
+        connectBtn.classList.remove('connecting');
+      }
+      initWebRTC(true);
+    };
+
+    const wsTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.warn("WebSocket connection timed out (3s).");
+        ws.close();
+        triggerFallback();
+      }
+    }, 3000);
+
     ws.onopen = () => {
+      clearTimeout(wsTimeout);
       console.log(`✅ WebSocket connected to ${d.hostname} (${d.ip})`);
       d.ws = ws;
       activatePC(d);
@@ -455,14 +483,7 @@ globalThis.connectToPC = async (i: number) => {
 
     ws.onerror = (err) => {
       console.error("[DEBUG] WebSocket Connection Error:", err);
-      if (connectBtn) {
-        connectBtn.textContent = 'Connect';
-        connectBtn.classList.remove('connecting');
-      }
-      
-      // FALLBACK TO FIREBASE WEBRTC IF LAN WEBSOCKET FAILS
-      console.log("WebSocket failed. Falling back to Firebase WebRTC signaling.");
-      initWebRTC(true);
+      triggerFallback();
     };
 
     ws.onclose = (event) => {
@@ -788,7 +809,9 @@ async function startApp() {
 
   // Get hub info to find the Local LAN IP
   try {
-    const res = await fetch(hubApi("/api/hub/info"));
+    const res = await fetch(hubApi("/api/hub/info"), {
+      signal: AbortSignal.timeout(3000)
+    });
     const data = await res.json();
     
     // 1. Add the current domain
@@ -905,7 +928,6 @@ async function tryAutoConnect(hubUrl: string, hubName: string) {
 // ============================================================
 function setupScannerPage() {
   const manualBtn = document.getElementById('scanManualBtn')!;
-  const qrBtn = document.getElementById('scanQrBtn')!;
   const cancelWaitBtn = document.getElementById('cancelPairWaitBtn')!;
 
   manualBtn.addEventListener('click', () => {
@@ -913,17 +935,16 @@ function setupScannerPage() {
     if (ip?.trim()) addScanResult(ip.trim(), 'Manual PC');
   });
 
-  qrBtn.addEventListener('click', () => {
-    // Fall back to QR overlay — prompt for PIN
-    const scannerPage = document.getElementById('scannerPage')!;
-    scannerPage.classList.add('hidden');
-    pairingOverlay.style.display = 'flex';
-  });
-
   cancelWaitBtn.addEventListener('click', () => {
     document.getElementById('pairingWaitScreen')!.classList.remove('active');
     document.getElementById('scannerFooter')!.style.display = 'flex';
     document.getElementById('scanResultList')!.style.display = 'flex';
+  });
+
+  document.getElementById('pairBtn')?.addEventListener('click', () => {
+    pairingOverlay.style.display = 'none';
+    document.getElementById('scannerPage')!.classList.remove('hidden');
+    startNetworkScan();
   });
 }
 
@@ -1393,12 +1414,12 @@ async function autoPair(pin: string) {
     if (data.status === "approved" && data.token) {
       finalizePairing(data.token);
     } else if (data.status === "pending") {
-      pairStatusText.textContent = "Waiting for Hub approval…";
+      pairStatusText.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Waiting for Hub approval...';
       pollPairingStatus(data.request_id);
     } else {
-      pairError.style.opacity = '1';
+      pairError.style.display = 'block';
+      document.getElementById('pairBtn')!.style.display = 'block';
       triggerHaptic(ImpactStyle.Medium);
-      setTimeout(() => pairError.style.opacity = '0', 3000);
       pairStatusText.textContent = "";
     }
   } catch (e) {
