@@ -800,9 +800,12 @@ async function startApp() {
   // 0. Check for Hub URL in query params (from Vercel QR code)
   const urlParams = new URLSearchParams(window.location.search);
   const hubParam = urlParams.get('hub');
+  // Only add QR Remote entry if it's a different host from what we're already on
   if (hubParam) {
     const hubIp = hubParam.replace('https://', '').replace('http://', '');
-    addDeviceToList(hubIp, "Hub (QR Remote)");
+    if (hubIp !== HUB_HOSTNAME) {
+      addDeviceToList(hubIp, "Hub (QR Remote)");
+    }
   }
 
   // Get hub info to find the Local LAN IP
@@ -812,7 +815,7 @@ async function startApp() {
     });
     const data = await res.json();
     
-    // 1. Add the current domain
+    // 1. Add the current domain as Hub (Primary)
     addDeviceToList(HUB_HOSTNAME, "Hub (Primary)");
     
     // 2. Add the Local LAN IP (if different)
@@ -852,22 +855,25 @@ async function startApp() {
        }
     }
 
-    // Fallback: connect to the device at index 0 (usually the current domain / cloud tunnel)
-    console.log("📡 Using Cloud Tunnel (Cloudflare)");
+    // Fallback: find Hub (Primary) by hostname and connect to it
+    console.log("📡 Using Cloud Tunnel / Hub (Primary)");
+    const primaryIdx = devices.findIndex(d => d.ip === HUB_HOSTNAME || d.hostname === "Hub (Primary)");
     // @ts-ignore
-    globalThis.connectToPC(0);
+    globalThis.connectToPC(primaryIdx !== -1 ? primaryIdx : 0);
 
   } catch (e) {
     console.error("Hybrid start failed:", e);
     addDeviceToList(HUB_HOSTNAME, "Hub (Primary)");
+    const primaryIdx = devices.findIndex(d => d.ip === HUB_HOSTNAME || d.hostname === "Hub (Primary)");
     // @ts-ignore
-    globalThis.connectToPC(0);
+    globalThis.connectToPC(primaryIdx !== -1 ? primaryIdx : 0);
   }
 }
 
 // ============================================================
 // AUTO-CONNECT (Returning Users)
 // ============================================================
+
 async function tryAutoConnect(hubUrl: string, hubName: string) {
   const splash = document.getElementById('autoConnectSplash')!;
   const splashTitle = document.getElementById('autoConnectTitle')!;
