@@ -301,7 +301,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                                 pass
                                 
                     except Exception as e:
-                        pass
+                        logger.error(f"Firebase signaling error: {e}")
                     
                     await asyncio.sleep(1.5)
 
@@ -891,11 +891,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             from urllib.parse import urlparse
             cloudflare_host = urlparse(app.state.cloudflare_url).hostname
 
+        custom_host = ""
+        hub_url = os.getenv("HUB_URL")
+        if hub_url:
+            from urllib.parse import urlparse
+            custom_host = urlparse(hub_url).hostname
+
         is_hub = (
             not target
             or target in ("localhost", "127.0.0.1", lan_ip)
             or (ngrok_host and target == ngrok_host)
             or (cloudflare_host and target == cloudflare_host)
+            or (custom_host and target == custom_host)
         )
         
         if is_hub:
@@ -992,11 +999,18 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             from urllib.parse import urlparse
             cloudflare_host = urlparse(app.state.cloudflare_url).hostname
 
+        custom_host = ""
+        hub_url = os.getenv("HUB_URL")
+        if hub_url:
+            from urllib.parse import urlparse
+            custom_host = urlparse(hub_url).hostname
+
         is_hub = (
             not target
             or target in ("localhost", "127.0.0.1", lan_ip)
             or (ngrok_host and target == ngrok_host)
             or (cloudflare_host and target == cloudflare_host)
+            or (custom_host and target == custom_host)
         )
         
         if is_hub:
@@ -1402,12 +1416,19 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             from urllib.parse import urlparse
             cloudflare_host = urlparse(app.state.cloudflare_url).hostname
 
+        custom_host = ""
+        hub_url = os.getenv("HUB_URL")
+        if hub_url:
+            from urllib.parse import urlparse
+            custom_host = urlparse(hub_url).hostname
+
         is_local = (
             target is None
             or target == local_ip
             or target == "localhost"
             or (ngrok_host and target == ngrok_host)
             or (cloudflare_host and target == cloudflare_host)
+            or (custom_host and target == custom_host)
         )
 
         if not is_local:
@@ -1589,6 +1610,20 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
                 if keys:
                     res = mouse.handle_hotkey(keys)
                     if responder: await responder.send_json({"status": res})
+            elif mtype == "camera_toggle":
+                active = data.get("active", False)
+                try:
+                    if active:
+                        if not app.state.vision.is_running:
+                            app.state.vision.start()
+                            logger.info("Camera started via WS/WebRTC")
+                    else:
+                        if app.state.vision.is_running:
+                            app.state.vision.stop()
+                            logger.info("Camera stopped via WS/WebRTC")
+                    if responder: await responder.send_json({"status": "CAMERA_TOGGLED", "active": app.state.vision.is_running})
+                except Exception as e:
+                    logger.error("Camera toggle error: %s", e)
         except Exception as e:
             logger.error("WS Message Error: %s", e)
 
@@ -1611,14 +1646,13 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.get("/mobile.html")
     async def mobile_page_alias():
         return FileResponse(MOBILE_DIST / "index.html")
-    
     @app.get("/hub")
     async def hub_page():
         with open(HUB_HTML, "r", encoding="utf-8") as f:
             content = f.read()
             
-        # Prioritize Cloudflare > ngrok
-        remote_url = getattr(app.state, "cloudflare_url", None) or getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
+        # Prioritize Custom Domain > Cloudflare > ngrok
+        remote_url = os.getenv("HUB_URL") or getattr(app.state, "cloudflare_url", None) or getattr(app.state, "ngrok_url", None) or os.getenv("NGROK_URL")
         
         info = {
             "pin": tokens.current_pin,
@@ -1663,12 +1697,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         logger.info(f"QR Request - Host: {host}, is_local: {is_local}, is_cloud: {is_cloud_header}")
         
         # Get the active tunnel URL if it exists
-        tunnel_url = getattr(app.state, 'cloudflare_url', None)
+        tunnel_url = os.getenv("HUB_URL") or getattr(app.state, 'cloudflare_url', None)
         
         if url:
             target = url
         else:
-            # Determine the hub address (either the Cloudflare tunnel or the local LAN IP)
+            # Determine the hub address (either the custom domain, Cloudflare tunnel or the local LAN IP)
             if tunnel_url:
                 hub_address = tunnel_url
             elif not is_local:

@@ -163,7 +163,7 @@ async function init() {
   const pcCameraToggle = document.getElementById("pcCameraToggle") as HTMLInputElement;
 
   pcCameraToggle?.addEventListener('change', async (e: any) => {
-    if (!activePC) {
+    if (!activePC && !isCommandChannelOpen()) {
       alert("Connect to a PC first!");
       pcCameraToggle.checked = false;
       return;
@@ -189,30 +189,65 @@ async function init() {
     }
 
     try {
-      const res = await fetch(hubApi(`/api/hub/camera/toggle${targetParam}`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active })
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
-      
-      if (active) {
-        setupHubWebRTC();
-        startCameraPolling(targetParam);
-      } else {
-        if (cameraPollInterval) {
-          clearInterval(cameraPollInterval);
-          cameraPollInterval = null;
+      if (isCommandChannelOpen()) {
+        sendCommand({ type: 'camera_toggle', active });
+        // In WebRTC mode, assume the toggle command went through successfully.
+        if (active) {
+          // Send WebRTC offer for camera stream via fetch (will fail in firebase-webrtc-only without tunnel)
+          // But wait, setupHubWebRTC will close our current WebRTC connection!
+          if (dataChannel && dataChannel.readyState === 'open') {
+             // ⚠️ Cannot setup camera WebRTC over same data channel easily without renegotiation.
+             // Inform user that camera is not supported in fallback mode.
+             alert("Camera feed is not supported in Fallback connection mode. Please ensure PC and phone are on the same Wi-Fi, or enable a Cloudflare tunnel.");
+             pcCameraToggle.disabled = false;
+             pcCameraToggle.checked = false;
+             if (remoteGestureStatus) {
+               remoteGestureStatus.innerHTML = "CAMERA OFF";
+               remoteGestureStatus.style.color = "var(--text-secondary)";
+             }
+             return;
+          } else {
+            setupHubWebRTC();
+            startCameraPolling(targetParam);
+          }
+        } else {
+          if (cameraPollInterval) {
+            clearInterval(cameraPollInterval);
+            cameraPollInterval = null;
+          }
+          closeWebRTC();
+          pcCameraToggle.disabled = false;
+          if (remoteGestureStatus) {
+            remoteGestureStatus.innerHTML = "CAMERA OFF";
+            remoteGestureStatus.style.color = "var(--text-secondary)";
+          }
         }
-        closeWebRTC();
-        pcCameraToggle.disabled = false;
-        if (remoteGestureStatus) {
-          remoteGestureStatus.innerHTML = "CAMERA OFF";
-          remoteGestureStatus.style.color = "var(--text-secondary)";
+      } else {
+        const res = await fetch(hubApi(`/api/hub/camera/toggle${targetParam}`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ active })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        
+        if (active) {
+          setupHubWebRTC();
+          startCameraPolling(targetParam);
+        } else {
+          if (cameraPollInterval) {
+            clearInterval(cameraPollInterval);
+            cameraPollInterval = null;
+          }
+          closeWebRTC();
+          pcCameraToggle.disabled = false;
+          if (remoteGestureStatus) {
+            remoteGestureStatus.innerHTML = "CAMERA OFF";
+            remoteGestureStatus.style.color = "var(--text-secondary)";
+          }
         }
       }
-      console.log("[DEBUG] Camera toggle request sent:", { active, target: targetParam });
+      console.log("[DEBUG] Camera toggle request handled:", { active, target: targetParam });
     } catch (err) {
       console.error("[DEBUG] Camera toggle error:", err);
       alert(`Failed to toggle camera: ${err}`);
@@ -1246,13 +1281,13 @@ function setupTouchpad() {
       const pinchDelta = currentDist - lastPinchDist;
 
       if (Math.abs(pinchDelta) > 8) {
-        if (activePC?.ws?.readyState === 1) {
+        if (isCommandChannelOpen()) {
           sendCommand({ type: 'zoom', delta: pinchDelta });
         }
         lastPinchDist = currentDist;
       } else {
         const scrollDy = currentMidY - twoFingerMidY;
-        if (Math.abs(scrollDy) > 2 && activePC?.ws?.readyState === 1) {
+        if (Math.abs(scrollDy) > 2 && isCommandChannelOpen()) {
           sendCommand({ type: 'scroll', dy: scrollDy * -1.5 });
         }
       }
@@ -1289,18 +1324,18 @@ function setupTouchpad() {
 
     if (isDragging) {
       isDragging = false;
-      if (activePC?.ws?.readyState === 1) {
+      if (isCommandChannelOpen()) {
         sendCommand({ type: 'click_up', button: 'left' });
       }
     } else if (duration < 250 && !isMoving) {
-      if (activePC?.ws?.readyState === 1 && maxFingers < 3) {
+      if (isCommandChannelOpen() && maxFingers < 3) {
         const button = maxFingers === 2 ? 'right' : 'left';
         sendCommand({ type: 'click', button });
         triggerHaptic(maxFingers === 2 ? ImpactStyle.Medium : ImpactStyle.Light);
       }
       lastTapTime = now;
     } else if (duration >= 1000 && !isMoving) {
-      if (activePC?.ws?.readyState === 1 && (maxFingers === 3 || maxFingers === 4)) {
+      if (isCommandChannelOpen() && (maxFingers === 3 || maxFingers === 4)) {
         sendCommand({ type: 'shortcut', slot: `touch_${maxFingers}_finger` });
         triggerHaptic(ImpactStyle.Heavy);
       }
@@ -1330,7 +1365,7 @@ function setupKeyboardToolbar() {
   };
 
   keyboardInput.addEventListener('keydown', (e) => {
-    if (!activePC?.ws || activePC.ws.readyState !== 1) return;
+    if (!isCommandChannelOpen()) return;
     if (["Backspace", "Enter", "Tab", "Escape"].includes(e.key)) {
       sendCommand({ type: 'key', key: e.key });
       e.preventDefault();
@@ -1338,13 +1373,19 @@ function setupKeyboardToolbar() {
   });
 
   keyboardInput.addEventListener('input', () => {
-    if (!activePC?.ws || activePC.ws.readyState !== 1) return;
+    if (!isCommandChannelOpen()) return;
     const val = keyboardInput.value;
     if (val.length > 0) {
       sendCommand({ type: 'key', key: val });
       keyboardInput.value = '';
     }
   });
+}
+
+function isCommandChannelOpen(): boolean {
+  if (dataChannel && dataChannel.readyState === 'open') return true;
+  if (activePC?.ws && activePC.ws.readyState === 1) return true;
+  return false;
 }
 
 function sendHotkey(keys: string[]) {
