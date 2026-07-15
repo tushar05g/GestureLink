@@ -1645,12 +1645,8 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             # Clean up the hostname
             hub_hostname = hub_address.replace("https://", "").replace("http://", "").rstrip("/")
             
-            # If it's a local IP, point the QR code directly to the Hub's local server
-            # to avoid HTTPS -> HTTP Mixed Content blocks from app.thequinn.tech
-            if is_local and not tunnel_url:
-                target = f"http://{hub_hostname}"
-            else:
-                target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
+            # Always use the hosted frontend URL to ensure consistency
+            target = f"{frontend_base.rstrip('/')}/?hub={hub_hostname}"
                 
             logger.info(f"QR pointing to: {target}")
             
