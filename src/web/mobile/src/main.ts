@@ -437,6 +437,7 @@ globalThis.connectToPC = async (i: number) => {
         connectBtn.textContent = 'Connect';
         connectBtn.classList.remove('connecting');
       }
+      activatePC(d);
       initWebRTC(true);
     };
 
@@ -473,6 +474,11 @@ globalThis.connectToPC = async (i: number) => {
       if (activePC === d) {
         connBadge.textContent = "OFFLINE";
         connBadge.classList.remove('online');
+        const connBadgeDevice = document.getElementById("connBadgeDevice");
+        if (connBadgeDevice) {
+          connBadgeDevice.textContent = "OFFLINE";
+          connBadgeDevice.classList.remove('online');
+        }
         if (event.code === 4003 || event.code === 1008) {
           console.log("Token rejected - forcing re-pair");
           localStorage.removeItem("gesturelink_token");
@@ -493,6 +499,11 @@ globalThis.connectToPC = async (i: number) => {
           console.error("[DEBUG] Server error:", data.message);
           connBadge.textContent = 'ERROR';
           connBadge.classList.remove('online');
+          const connBadgeDevice = document.getElementById("connBadgeDevice");
+          if (connBadgeDevice) {
+            connBadgeDevice.textContent = 'ERROR';
+            connBadgeDevice.classList.remove('online');
+          }
           alert(`⚠️ ${data.message || 'Connection error'}`);
           return;
         }
@@ -664,6 +675,11 @@ async function activatePC(d: any) {
   activeDeviceIP.textContent = d.ip;
   connBadge.textContent = "ONLINE";
   connBadge.classList.add('online');
+  const connBadgeDevice = document.getElementById("connBadgeDevice");
+  if (connBadgeDevice) {
+    connBadgeDevice.textContent = "ONLINE";
+    connBadgeDevice.classList.add('online');
+  }
   document.getElementById('disconnectBtn')?.classList.add('visible');
   syncSettings();
 
