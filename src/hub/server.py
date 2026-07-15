@@ -1495,7 +1495,7 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
         # LOCAL HUB LOGIC — register as connected
         logger.info("LOCAL PATH: client=%s entering local hub control loop", client_ip)
-        import time, os
+        import time
         nonlocal active_hub_dashboards
         if token == "hub_internal":
             active_hub_dashboards += 1

@@ -193,29 +193,12 @@ async function init() {
         sendCommand({ type: 'camera_toggle', active });
         // In WebRTC mode, assume the toggle command went through successfully.
         if (active) {
-          // Send WebRTC offer for camera stream via fetch (will fail in firebase-webrtc-only without tunnel)
-          // But wait, setupHubWebRTC will close our current WebRTC connection!
-          if (dataChannel && dataChannel.readyState === 'open') {
-             // ⚠️ Cannot setup camera WebRTC over same data channel easily without renegotiation.
-             // Inform user that camera is not supported in fallback mode.
-             alert("Camera feed is not supported in Fallback connection mode. Please ensure PC and phone are on the same Wi-Fi, or enable a Cloudflare tunnel.");
-             pcCameraToggle.disabled = false;
-             pcCameraToggle.checked = false;
-             if (remoteGestureStatus) {
-               remoteGestureStatus.innerHTML = "CAMERA OFF";
-               remoteGestureStatus.style.color = "var(--text-secondary)";
-             }
-             return;
-          } else {
-            setupHubWebRTC();
-            startCameraPolling(targetParam);
-          }
+          startCameraPolling(targetParam);
         } else {
           if (cameraPollInterval) {
             clearInterval(cameraPollInterval);
             cameraPollInterval = null;
           }
-          closeWebRTC();
           pcCameraToggle.disabled = false;
           if (remoteGestureStatus) {
             remoteGestureStatus.innerHTML = "CAMERA OFF";
@@ -232,14 +215,12 @@ async function init() {
         if (!data.ok) throw new Error(data.error);
         
         if (active) {
-          setupHubWebRTC();
           startCameraPolling(targetParam);
         } else {
           if (cameraPollInterval) {
             clearInterval(cameraPollInterval);
             cameraPollInterval = null;
           }
-          closeWebRTC();
           pcCameraToggle.disabled = false;
           if (remoteGestureStatus) {
             remoteGestureStatus.innerHTML = "CAMERA OFF";
@@ -260,46 +241,7 @@ async function init() {
     }
   });
 
-  async function setupHubWebRTC() {
-    closeWebRTC(); // Reset
-    
-    // Enhanced ICE configuration for hotspot support
-    const iceServers = [
-      { urls: ["stun:stun.l.google.com:19302"] },
-      { urls: ["stun:stun1.l.google.com:19302"] },
-      // TURN server for double-NAT traversal (hotspot fallback)
-      {
-        urls: ["turn:numb.viagenie.ca"],
-        username: "webrtc@example.com",
-        credential: "webrtcpassword"
-      }
-    ];
-    
-    peerConn = new RTCPeerConnection({
-        iceServers: iceServers
-    });
 
-    dataChannel = peerConn.createDataChannel("gestures", { ordered: false });
-
-    const offer = await peerConn.createOffer();
-    await peerConn.setLocalDescription(offer);
-
-    const res = await fetch(hubApi("/api/webrtc/offer"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sdp: peerConn.localDescription?.sdp, type: peerConn.localDescription?.type })
-    });
-    const answer = await res.json();
-    await peerConn.setRemoteDescription(new RTCSessionDescription(answer));
-  }
-
-  function closeWebRTC() {
-    if (peerConn) {
-        peerConn.close();
-        peerConn = null;
-        dataChannel = null;
-    }
-  }
 
   // Vision Mode Buttons
   const modeBtns = document.querySelectorAll(".mode-btn");
