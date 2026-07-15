@@ -4,7 +4,7 @@ import { initializeApp } from "firebase/app";
 import { getDatabase, ref, set, onValue } from "firebase/database";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCN_N58BRlmUjraIyLDtvQlK3BBlzklces",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: "gesturelink-5db9c.firebaseapp.com",
   databaseURL: "https://gesturelink-5db9c-default-rtdb.firebaseio.com",
   projectId: "gesturelink-5db9c",
