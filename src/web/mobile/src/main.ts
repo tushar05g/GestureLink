@@ -84,6 +84,27 @@ const leftArrowBtn = document.getElementById("leftArrowBtn")!;
 const rightArrowBtn = document.getElementById("rightArrowBtn")!;
 const kbBtn = document.getElementById("kbBtn")!;
 
+// --- Scanner / Discovery State ---
+const SAVED_HUB_KEY = "gesturelink_hub_saved";
+const SAVED_HUB_NAME_KEY = "gesturelink_hub_name";
+
+function getSavedHub(): { url: string; name: string } | null {
+  const url = localStorage.getItem(SAVED_HUB_KEY);
+  const name = localStorage.getItem(SAVED_HUB_NAME_KEY) || "Your PC";
+  if (url) return { url, name };
+  return null;
+}
+
+function saveHub(url: string, name: string) {
+  localStorage.setItem(SAVED_HUB_KEY, url);
+  localStorage.setItem(SAVED_HUB_NAME_KEY, name);
+}
+
+function forgetHub() {
+  localStorage.removeItem(SAVED_HUB_KEY);
+  localStorage.removeItem(SAVED_HUB_NAME_KEY);
+}
+
 // --- Initialization ---
 async function init() {
   setupNav();
@@ -96,40 +117,40 @@ async function init() {
     appModal.style.display = 'none';
   };
 
-  // Auto-pairing from QR: Always prioritize auto-pin if provided
+  // ---- DETERMINE STARTUP FLOW ----
   const urlParams = new URLSearchParams(globalThis.location.search);
   const autoPin = urlParams.get('pin');
-  if (autoPin?.length === 6) {
+  const hubParam = urlParams.get('hub');
+
+  // FLOW 1: QR Code URL — has ?pin= and ?hub= params → use legacy overlay flow
+  if (autoPin?.length === 6 && hubParam) {
+    // Show QR pairing overlay (legacy web flow)
+    const scannerPage = document.getElementById('scannerPage')!;
+    scannerPage.classList.add('hidden');
+    pairingOverlay.style.display = 'flex';
+    pairStatusText.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Verifying PIN...';
     await autoPair(autoPin);
     authToken = localStorage.getItem("gesturelink_token");
-  }
-
-  // Validate stored token against server — catches stale tokens after server restart
-  if (authToken && authToken !== "undefined") {
-    try {
-      const vRes = await fetch(hubApi("/api/validate-token"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: authToken })
-      });
-      const vData = await vRes.json();
-      if (vData.valid) {
-        pairingOverlay.classList.add('hidden');
-        setTimeout(() => pairingOverlay.style.display = 'none', 500);
-        startApp();
-      } else {
-        // Token expired/server restarted — force re-pair cleanly
-        localStorage.removeItem("gesturelink_token");
-        authToken = null;
-        pairingOverlay.style.display = 'flex';
-      }
-    } catch (_) {
-      // Server unreachable — still show overlay
+    if (!authToken || authToken === "undefined") {
       pairingOverlay.style.display = 'flex';
     }
-  } else {
-    pairingOverlay.style.display = 'flex';
+    setupScannerPage();
+    return;
   }
+
+  // FLOW 2: Returning user — has a saved hub → try auto-connect
+  const saved = getSavedHub();
+  if (saved && !autoPin) {
+    const scannerPage = document.getElementById('scannerPage')!;
+    scannerPage.classList.add('hidden');
+    await tryAutoConnect(saved.url, saved.name);
+    setupScannerPage();
+    return;
+  }
+
+  // FLOW 3: New user — show scanner page
+  setupScannerPage();
+  startNetworkScan();
 
   // Haptic toggle
   document.getElementById("hapticToggle")?.addEventListener('change', (e: any) => {
@@ -280,6 +301,14 @@ async function init() {
     }
   });
 
+  document.getElementById("forgetHubBtn")?.addEventListener('click', async () => {
+    if (confirm("Forget this PC? You will need to scan and reconnect on next launch.")) {
+      forgetHub();
+      localStorage.removeItem("gesturelink_token");
+      location.reload();
+    }
+  });
+
   document.getElementById("addManualBtn")!.onclick = () => {
     const ip = prompt("Enter Hub IP (e.g. 192.168.1.5):");
     if (ip) addDeviceToList(ip, "Manual PC");
@@ -421,6 +450,7 @@ globalThis.connectToPC = async (i: number) => {
       activatePC(d);
       initWebRTC();
       renderDeviceList();
+      hidePairingOverlay();
     };
 
     ws.onerror = (err) => {
@@ -511,7 +541,7 @@ async function initWebRTC(isFallback = false) {
           activeDeviceName.textContent = "PC (Remote)";
           activeDeviceIP.textContent = "WebRTC";
           document.getElementById('disconnectBtn')?.classList.add('visible');
-          pairingOverlay.style.display = 'none';
+          hidePairingOverlay();
       }
   };
   dataChannel.onclose = () => dataChannel = null;
@@ -814,6 +844,280 @@ async function startApp() {
   }
 }
 
+// ============================================================
+// AUTO-CONNECT (Returning Users)
+// ============================================================
+async function tryAutoConnect(hubUrl: string, hubName: string) {
+  const splash = document.getElementById('autoConnectSplash')!;
+  const splashTitle = document.getElementById('autoConnectTitle')!;
+  const splashSub = document.getElementById('autoConnectSub')!;
+  const cancelBtn = document.getElementById('autoConnectCancelBtn')!;
+
+  splashTitle.textContent = `Connecting to ${hubName}...`;
+  splashSub.textContent = 'Reaching your last connected Hub';
+  splash.classList.add('active');
+
+  let cancelled = false;
+  cancelBtn.onclick = () => {
+    cancelled = true;
+    splash.classList.remove('active');
+    forgetHub();
+    const scannerPage = document.getElementById('scannerPage')!;
+    scannerPage.classList.remove('hidden');
+    startNetworkScan();
+  };
+
+  // Try to validate existing token with saved hub
+  const savedToken = localStorage.getItem('gesturelink_token');
+  if (savedToken && savedToken !== 'undefined') {
+    try {
+      const vRes = await fetch(`${hubUrl}/api/validate-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: savedToken }),
+        signal: AbortSignal.timeout(3000)
+      });
+      const vData = await vRes.json();
+      if (!cancelled && vData.valid) {
+        authToken = savedToken;
+        splash.classList.remove('active');
+        splashTitle.textContent = 'Connected!';
+        addDeviceToList(new URL(hubUrl).hostname, hubName);
+        // @ts-ignore
+        globalThis.connectToPC(0);
+        return;
+      }
+    } catch (_) { /* timeout or unreachable */ }
+  }
+
+  if (cancelled) return;
+  splash.classList.remove('active');
+  // Could not auto-connect — go to scanner
+  const scannerPage = document.getElementById('scannerPage')!;
+  scannerPage.classList.remove('hidden');
+  const statusEl = document.getElementById('scanStatusText')!;
+  statusEl.textContent = `Couldn't reach ${hubName}. Scanning...`;
+  startNetworkScan();
+}
+
+// ============================================================
+// SCANNER PAGE SETUP
+// ============================================================
+function setupScannerPage() {
+  const manualBtn = document.getElementById('scanManualBtn')!;
+  const qrBtn = document.getElementById('scanQrBtn')!;
+  const cancelWaitBtn = document.getElementById('cancelPairWaitBtn')!;
+
+  manualBtn.addEventListener('click', () => {
+    const ip = prompt('Enter Hub IP address (e.g. 192.168.1.10):');
+    if (ip?.trim()) addScanResult(ip.trim(), 'Manual PC');
+  });
+
+  qrBtn.addEventListener('click', () => {
+    // Fall back to QR overlay — prompt for PIN
+    const scannerPage = document.getElementById('scannerPage')!;
+    scannerPage.classList.add('hidden');
+    pairingOverlay.style.display = 'flex';
+  });
+
+  cancelWaitBtn.addEventListener('click', () => {
+    document.getElementById('pairingWaitScreen')!.classList.remove('active');
+    document.getElementById('scannerFooter')!.style.display = 'flex';
+    document.getElementById('scanResultList')!.style.display = 'flex';
+  });
+}
+
+// ============================================================
+// NETWORK SCAN
+// ============================================================
+async function startNetworkScan() {
+  const statusEl = document.getElementById('scanStatusText')!;
+  const resultList = document.getElementById('scanResultList')!;
+  statusEl.textContent = 'Scanning network...';
+  resultList.innerHTML = '';
+
+  // Ask hub (if reachable via HUB_BASE_URL) for its list of discovered peers
+  try {
+    const res = await fetch(`${HUB_BASE_URL}/api/hub/info`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      addScanResult(HUB_BASE_URL, data.hostname || 'Hub PC');
+      if (data.lan_ip) addScanResult(`http://${data.lan_ip}:${data.port || 8000}`, data.hostname || 'Hub PC (LAN)');
+    }
+  } catch (_) { /* not reachable via current HUB_BASE_URL */ }
+
+  // Probe LAN subnet for Hubs (192.168.x.1-254 on port 8000)
+  const localIP = await detectLocalSubnet();
+  if (localIP) {
+    const parts = localIP.split('.');
+    const subnet = `${parts[0]}.${parts[1]}.${parts[2]}`;
+    statusEl.textContent = `Scanning ${subnet}.0/24...`;
+
+    const probes: Promise<void>[] = [];
+    for (let i = 1; i <= 254; i++) {
+      const ip = `${subnet}.${i}`;
+      probes.push(probeHub(ip));
+    }
+    await Promise.allSettled(probes);
+  }
+
+  const count = document.querySelectorAll('.scan-device-card').length;
+  statusEl.textContent = count > 0
+    ? `Found ${count} device${count > 1 ? 's' : ''}`
+    : 'No devices found on this network';
+}
+
+async function detectLocalSubnet(): Promise<string | null> {
+  return new Promise(resolve => {
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('');
+      pc.createOffer().then(o => pc.setLocalDescription(o));
+      pc.onicecandidate = e => {
+        if (!e.candidate) { pc.close(); resolve(null); return; }
+        const match = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+        if (match && !match[1].startsWith('169.254')) {
+          pc.close();
+          resolve(match[1]);
+        }
+      };
+      setTimeout(() => { pc.close(); resolve(null); }, 3000);
+    } catch (_) { resolve(null); }
+  });
+}
+
+async function probeHub(ip: string) {
+  try {
+    const res = await fetch(`http://${ip}:8000/api/ping`, {
+      signal: AbortSignal.timeout(500),
+      headers: { 'Accept': 'application/json' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.service === 'gesturelink-hub') {
+        addScanResult(`http://${ip}:8000`, data.hostname || ip);
+      }
+    }
+  } catch (_) { /* not a hub */ }
+}
+
+function addScanResult(url: string, name: string) {
+  const list = document.getElementById('scanResultList')!;
+  const existing = Array.from(list.querySelectorAll('.scan-device-card'))
+    .find(el => el.getAttribute('data-url') === url);
+  if (existing) return;
+
+  const card = document.createElement('div');
+  card.className = 'scan-device-card';
+  card.setAttribute('data-url', url);
+  card.innerHTML = `
+    <div class="scan-device-icon">💻</div>
+    <div class="scan-device-info">
+      <div class="scan-device-name">${name}</div>
+      <div class="scan-device-ip">${url}</div>
+    </div>
+    <i class="fas fa-chevron-right scan-device-arrow"></i>
+  `;
+  card.addEventListener('click', () => requestPairingFromHub(url, name));
+  list.appendChild(card);
+}
+
+// ============================================================
+// PAIRING REQUEST (PIN-less APK flow)
+// ============================================================
+async function requestPairingFromHub(hubUrl: string, hubName: string) {
+  const waitScreen = document.getElementById('pairingWaitScreen')!;
+  const waitTitle = document.getElementById('pairingWaitTitle')!;
+  const footer = document.getElementById('scannerFooter')!;
+  const resultList = document.getElementById('scanResultList')!;
+
+  waitTitle.textContent = `Connecting to ${hubName}...`;
+  waitScreen.classList.add('active');
+  footer.style.display = 'none';
+  resultList.style.display = 'none';
+
+  try {
+    const res = await fetch(`${hubUrl}/api/pair-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hostname: `${navigator.userAgent.includes('Android') ? 'Android' : 'Mobile'} Controller`,
+        device_id: getDeviceId()
+      }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const data = await res.json();
+
+    if (data.status === 'approved' && data.token) {
+      // Auto-approved (trusted device)
+      authToken = data.token;
+      localStorage.setItem('gesturelink_token', data.token);
+      saveHub(hubUrl, hubName);
+      document.getElementById('scannerPage')!.classList.add('hidden');
+      addDeviceToList(new URL(hubUrl).hostname, hubName);
+      // @ts-ignore
+      globalThis.connectToPC(0);
+    } else if (data.status === 'pending') {
+      waitTitle.textContent = 'Waiting for approval on PC...';
+      pollForApproval(data.request_id, hubUrl, hubName);
+    } else {
+      throw new Error(data.error || 'Rejected');
+    }
+  } catch (e: any) {
+    waitScreen.classList.remove('active');
+    footer.style.display = 'flex';
+    resultList.style.display = 'flex';
+    alert(`Connection failed: ${e.message || 'Could not reach Hub'}`);
+  }
+}
+
+async function pollForApproval(reqId: string, hubUrl: string, hubName: string) {
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch(`${hubUrl}/api/pair/status/${reqId}`, {
+        signal: AbortSignal.timeout(3000)
+      });
+      const data = await res.json();
+      if (data.status === 'approved' && data.token) {
+        clearInterval(interval);
+        authToken = data.token;
+        localStorage.setItem('gesturelink_token', data.token);
+        saveHub(hubUrl, hubName);
+        document.getElementById('scannerPage')!.classList.add('hidden');
+        addDeviceToList(new URL(hubUrl).hostname, hubName);
+        triggerHaptic(ImpactStyle.Heavy);
+        // @ts-ignore
+        globalThis.connectToPC(0);
+      } else if (data.status === 'rejected') {
+        clearInterval(interval);
+        document.getElementById('pairingWaitScreen')!.classList.remove('active');
+        document.getElementById('scannerFooter')!.style.display = 'flex';
+        document.getElementById('scanResultList')!.style.display = 'flex';
+        alert('Connection denied by the PC user.');
+      }
+    } catch (_) { /* keep polling */ }
+  }, 2000);
+
+  // Stop after 60 seconds
+  setTimeout(() => {
+    clearInterval(interval);
+    document.getElementById('pairingWaitScreen')!.classList.remove('active');
+    document.getElementById('scannerFooter')!.style.display = 'flex';
+    document.getElementById('scanResultList')!.style.display = 'flex';
+  }, 60000);
+}
+
+function getDeviceId(): string {
+  let id = localStorage.getItem('gesturelink_device_id');
+  if (!id) {
+    id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('gesturelink_device_id', id);
+  }
+  return id;
+}
+
 async function logout() {
   const token = localStorage.getItem("gesturelink_token");
   if (token) {
@@ -827,6 +1131,7 @@ async function logout() {
   }
   localStorage.removeItem("gesturelink_token");
   localStorage.removeItem("gesturelink_ip");
+  forgetHub(); // Clear saved hub so scanner shows on next launch
   
   // Clear only the PIN parameter to prevent auto-pairing on reload, but keep the Hub address
   const url = new URL(window.location.href);
@@ -1103,11 +1408,22 @@ async function autoPair(pin: string) {
   }
 }
 
+function hidePairingOverlay() {
+  // Hide legacy QR overlay
+  pairingOverlay.classList.add('hidden');
+  setTimeout(() => pairingOverlay.style.display = 'none', 500);
+  // Also hide scanner page (covers all startup flows)
+  document.getElementById('scannerPage')?.classList.add('hidden');
+  document.getElementById('autoConnectSplash')?.classList.remove('active');
+  // Navigate to control tab
+  const controlNavItem = document.querySelector('.nav-item[data-tab="control"]') as HTMLElement;
+  if (controlNavItem) controlNavItem.click();
+}
+
 function finalizePairing(token: string) {
   localStorage.setItem("gesturelink_token", token);
   authToken = token;
-  pairingOverlay.classList.add('hidden');
-  setTimeout(() => pairingOverlay.style.display = 'none', 500);
+  pairStatusText.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Connecting to PC...';
   triggerHaptic(ImpactStyle.Heavy);
   startApp();
 }

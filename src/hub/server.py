@@ -423,7 +423,12 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.get("/api/ping")
     async def ping() -> JSONResponse:
         """Lightweight endpoint for network device discovery."""
-        return JSONResponse({"ok": True, "hostname": socket.gethostname(), "ip": detect_lan_ip()})
+        return JSONResponse({
+            "ok": True,
+            "hostname": socket.gethostname(),
+            "ip": detect_lan_ip(),
+            "service": "gesturelink-hub"  # APK uses this to identify Hub nodes on LAN
+        })
 
     @app.post("/api/validate-token")
     async def validate_token_endpoint(payload: Annotated[dict, Body(...)]) -> JSONResponse:
@@ -1205,6 +1210,28 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
         # New/unknown device — go through pending approval popup
         req_id = security.add_pending_request(client_ip, hostname)
         logger.info("Pair request from %s (%s) -> pending ID %s", client_ip, hostname, req_id)
+        return JSONResponse({"status": "pending", "request_id": req_id})
+
+    @app.post("/api/pair-request")
+    async def pair_request(request: Request, payload: Annotated[dict, Body(...)]) -> JSONResponse:
+        """PIN-less pairing initiation for the native APK scanner flow.
+        The device sends its name and a unique device ID; the Hub shows an
+        approval popup (same as the existing security/pending flow).
+        """
+        hostname = payload.get("hostname", "Mobile Device")
+        device_id = payload.get("device_id", "")
+        client_ip = request.client.host if request.client else "0.0.0.0"
+        logger.info("APK pair-request from %s (%s) device_id=%s", client_ip, hostname, device_id)
+
+        # Auto-approve if this device is already trusted
+        if client_ip in security.trusted_ips:
+            token = tokens.generate_token(client_ip)
+            logger.info("Auto-approved trusted APK device %s (%s)", client_ip, hostname)
+            return JSONResponse({"status": "approved", "token": token})
+
+        # Add to pending — Hub UI will show the approval popup
+        req_id = security.add_pending_request(client_ip, hostname)
+        logger.info("APK pair-request pending for %s (%s) -> req_id=%s", client_ip, hostname, req_id)
         return JSONResponse({"status": "pending", "request_id": req_id})
 
     @app.get("/api/pair/status/{request_id}")
