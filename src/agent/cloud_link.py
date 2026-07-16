@@ -103,10 +103,14 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
                             pyautogui.press(key, _pause=False)
                     elif mtype == "camera_toggle":
                         active = data.get("active", False)
-                        async def _toggle():
+                        async def _toggle(active=active):
                             async with httpx.AsyncClient() as client:
                                 try:
-                                    await client.post(f"http://127.0.0.1:8000/api/hub/camera/toggle?active={'true' if active else 'false'}")
+                                    # POST with JSON body, not query params (server reads body)
+                                    await client.post(
+                                        "http://127.0.0.1:8000/api/hub/camera/toggle",
+                                        json={"active": active}
+                                    )
                                 except Exception as e:
                                     logging.error(f"Failed to relay camera toggle: {e}")
                         asyncio.create_task(_toggle())
@@ -118,8 +122,9 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
                                     status_data = res.json()
                                     channel.send(json.dumps({
                                         "type": "camera_status_result",
-                                        "ok": status_data.get("ok", False),
-                                        "active": status_data.get("active", False)
+                                        "ok": True,
+                                        "active": status_data.get("active", False),
+                                        "status": status_data.get("status", "inactive")
                                     }))
                                 except Exception as e:
                                     logging.error(f"Failed to fetch camera status: {e}")

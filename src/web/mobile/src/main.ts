@@ -559,7 +559,8 @@ async function initWebRTC(isFallback = false) {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === "camera_status_result") {
-        if (msg.active) {
+        const isActive = msg.active || msg.status === "active";
+        if (isActive) {
           if (cameraPollInterval) {
             clearInterval(cameraPollInterval);
             cameraPollInterval = null;
@@ -580,6 +581,7 @@ async function initWebRTC(isFallback = false) {
       console.error("WebRTC message parsing error:", e);
     }
   };
+
 
   const offer = await peerConn.createOffer();
   await peerConn.setLocalDescription(offer);
@@ -1008,6 +1010,10 @@ async function startNetworkScan() {
   statusEl.textContent = 'Scanning network...';
   resultList.innerHTML = '';
 
+  // Show a trust-cert helper button if we're on a HTTPS origin (Cloudflare tunnel etc.)
+  // so users can approve the Hub's self-signed cert before probing
+  let trustBtnShown = false;
+
   // Ask hub (if reachable via HUB_BASE_URL) for its list of discovered peers
   try {
     const res = await fetch(`${HUB_BASE_URL}/api/hub/info`, {
@@ -1016,29 +1022,59 @@ async function startNetworkScan() {
     if (res.ok) {
       const data = await res.json();
       addScanResult(HUB_BASE_URL, data.hostname || 'Hub PC');
-      if (data.lan_ip) addScanResult(`http://${data.lan_ip}:${data.port || 8000}`, data.hostname || 'Hub PC (LAN)');
+      const allIps: string[] = data.all_ips || (data.lan_ip ? [data.lan_ip] : []);
+      for (const ip of allIps) {
+        if (ip) {
+          addScanResult(`https://${ip}:${data.port || 8000}`, (data.hostname || 'Hub PC') + ' (Local)');
+        }
+      }
+      // Show trust-cert button if on a different origin than the Hub IP
+      if (allIps.length > 0 && !trustBtnShown) {
+        trustBtnShown = true;
+        const ip = allIps[0];
+        const port = data.port || 8000;
+        showTrustCertBanner(`https://${ip}:${port}`);
+      }
     }
   } catch (_) { /* not reachable via current HUB_BASE_URL */ }
 
   // Probe LAN subnet for Hubs (192.168.x.1-254 on port 8000)
   const localIP = await detectLocalSubnet();
+  const probes: Promise<void>[] = [];
+
+  // Always probe the Windows hotspot gateway first (192.168.137.1)
+  // This is the default when PC creates a mobile hotspot
+  probes.push(probeHub('192.168.137.1'));
+
   if (localIP) {
     const parts = localIP.split('.');
     const subnet = `${parts[0]}.${parts[1]}.${parts[2]}`;
     statusEl.textContent = `Scanning ${subnet}.0/24...`;
-
-    const probes: Promise<void>[] = [];
     for (let i = 1; i <= 254; i++) {
       const ip = `${subnet}.${i}`;
       probes.push(probeHub(ip));
     }
-    await Promise.allSettled(probes);
   }
+  await Promise.allSettled(probes);
 
   const count = document.querySelectorAll('.scan-device-card').length;
   statusEl.textContent = count > 0
     ? `Found ${count} device${count > 1 ? 's' : ''}`
-    : 'No devices found on this network';
+    : 'No devices found. Ensure Hub is running and tap the key icon to trust the certificate.';
+}
+
+function showTrustCertBanner(hubHttpsUrl: string) {
+  if (document.getElementById('trustCertBanner')) return; // don't show twice
+  const list = document.getElementById('scanResultList')!;
+  const banner = document.createElement('div');
+  banner.id = 'trustCertBanner';
+  banner.style.cssText = 'padding:12px 16px; background:rgba(255,170,0,0.12); border:1px solid rgba(255,170,0,0.3); border-radius:12px; margin-bottom:12px; font-size:0.82rem; display:flex; align-items:center; gap:10px;';
+  banner.innerHTML = `
+    <i class="fas fa-shield-alt" style="color:#ffaa00; font-size:1.1rem; flex-shrink:0"></i>
+    <span style="flex:1">If no devices appear, tap <strong style="color:#ffaa00">Trust Hub Certificate</strong> to allow your browser to connect securely.</span>
+    <button onclick="window.open('${hubHttpsUrl}', '_blank')" style="padding:6px 10px; background:#ffaa00; color:#000; border:none; border-radius:8px; font-size:0.75rem; font-weight:700; cursor:pointer; white-space:nowrap">Trust Certificate</button>
+  `;
+  list.parentElement?.insertBefore(banner, list);
 }
 
 async function detectLocalSubnet(): Promise<string | null> {
@@ -1061,18 +1097,28 @@ async function detectLocalSubnet(): Promise<string | null> {
 }
 
 async function probeHub(ip: string) {
-  try {
-    const res = await fetch(`http://${ip}:8000/api/ping`, {
-      signal: AbortSignal.timeout(500),
-      headers: { 'Accept': 'application/json' }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.service === 'gesturelink-hub') {
-        addScanResult(`http://${ip}:8000`, data.hostname || ip);
+  // Try HTTPS first (Hub uses self-signed HTTPS on port 8000)
+  // Also try HTTP as fallback (may work on non-browser environments or after cert trust)
+  const candidates = [
+    `https://${ip}:8000/api/ping`,
+    `http://${ip}:8000/api/ping`,
+  ];
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(1500),
+        headers: { 'Accept': 'application/json' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.service === 'gesturelink-hub') {
+          const baseUrl = url.replace('/api/ping', '');
+          addScanResult(baseUrl, data.hostname || ip);
+          return; // found it, stop trying
+        }
       }
-    }
-  } catch (_) { /* not a hub */ }
+    } catch (_) { /* try next */ }
+  }
 }
 
 function addScanResult(url: string, name: string) {
@@ -1456,35 +1502,71 @@ async function autoPair(pin: string) {
   const hubUrl = urlParams.get('hub') || HUB_BASE_URL;
   const baseUrl = hubUrl.startsWith('http') ? hubUrl : `https://${hubUrl}`;
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/pair`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin, hostname: "Mobile Controller" }),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    const data = await res.json();
+  // Build a list of URLs to try: tunnel URL first, then any LAN IPs from hub/info
+  const pairUrls: string[] = [baseUrl.replace(/\/$/, '')];
 
-    if (data.status === "approved" && data.token) {
-      finalizePairing(data.token);
-    } else if (data.status === "pending") {
-      pairStatusText.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Waiting for Hub approval...';
-      pollPairingStatus(data.request_id);
-    } else {
-      pairError.style.display = 'block';
-      document.getElementById('pairBtn')!.style.display = 'block';
-      triggerHaptic(ImpactStyle.Medium);
-      pairStatusText.textContent = "";
+  // Try to get LAN IPs from hub info (works when accessible via tunnel)
+  try {
+    const infoRes = await fetch(`${baseUrl.replace(/\/$/, '')}/api/hub/info`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (infoRes.ok) {
+      const info = await infoRes.json();
+      const proto = info.ssl_active ? 'https' : 'http';
+      const port = info.port || 8000;
+      const allIps: string[] = info.all_ips || (info.lan_ip ? [info.lan_ip] : []);
+      for (const ip of allIps) {
+        if (ip) pairUrls.push(`${proto}://${ip}:${port}`);
+      }
+      // Always try the Windows hotspot default gateway
+      pairUrls.push(`https://192.168.137.1:${port}`);
+      pairUrls.push(`http://192.168.137.1:${port}`);
     }
-  } catch (e) {
-    console.log("Network error (LAN unreachable). Falling back to Firebase WebRTC directly.");
-    // Bypass token logic and jump straight to WebRTC over Firebase
-    finalizePairing("firebase-webrtc-only");
+  } catch (_) { /* tunnel may not be reachable if on local-only network */ }
+
+  // Try each URL until one succeeds
+  for (const tryUrl of pairUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(`${tryUrl}/api/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin, hostname: "Mobile Controller" }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      const data = await res.json();
+
+      if (data.status === "approved" && data.token) {
+        // Save whichever URL worked as the hub URL
+        localStorage.setItem("gesturelink_hub_url", tryUrl);
+        finalizePairing(data.token);
+        return;
+      } else if (data.status === "pending") {
+        // Save whichever URL worked
+        localStorage.setItem("gesturelink_hub_url", tryUrl);
+        pairStatusText.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i>Waiting for Hub approval...';
+        pollPairingStatus(data.request_id);
+        return;
+      } else {
+        pairError.style.display = 'block';
+        document.getElementById('pairBtn')!.style.display = 'block';
+        triggerHaptic(ImpactStyle.Medium);
+        pairStatusText.textContent = "";
+        return;
+      }
+    } catch (_) {
+      // This URL failed, try the next one
+      console.log(`[autoPair] ${tryUrl} unreachable, trying next...`);
+    }
   }
+
+  // All URLs failed — fall back to Firebase WebRTC directly
+  console.log("All pair URLs failed. Falling back to Firebase WebRTC directly.");
+  finalizePairing("firebase-webrtc-only");
 }
+
 
 function hidePairingOverlay() {
   // Hide legacy QR overlay
