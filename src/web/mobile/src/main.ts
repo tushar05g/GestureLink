@@ -865,41 +865,40 @@ async function startApp() {
     // 1. Add the current domain as Hub (Primary)
     addDeviceToList(HUB_HOSTNAME, "Hub (Primary)");
     
-    // 2. Add the Local LAN IP (if different)
-    if (data.lan_ip && data.lan_ip !== HUB_HOSTNAME) {
-      addDeviceToList(data.lan_ip, "Hub (Local LAN)");
+    // 2. Add the Local LAN IP(s) (if different from the cloud tunnel)
+    const allIps: string[] = data.all_ips || (data.lan_ip ? [data.lan_ip] : []);
+    for (const ip of allIps) {
+      if (ip && ip !== HUB_HOSTNAME) {
+        addDeviceToList(ip, "Hub (Local LAN)");
+      }
     }
 
     // AUTO-CONNECT STRATEGY:
-    // Try zero-latency direct connection first (LAN), then fall back to tunnel
-    if (data.lan_ip && HUB_HOSTNAME !== data.lan_ip) {
-       console.log("🔍 Probing Local LAN for zero-latency fallback...");
-       try {
-         // Use protocol and port from hub info response
-         const proto = data.ssl_active ? "https" : "http";
-         const port = data.port || 8000;
-         const lanUrl = `${proto}://${data.lan_ip}:${port}/api/ping`;
-         console.log(`[DEBUG] LAN Probe URL: ${lanUrl}`);
-         
-         const probe = await fetch(lanUrl, { 
-           signal: AbortSignal.timeout(1000),
-           headers: { 'Accept': 'application/json' }
-         });
-         
-         if (probe.ok) {
-           console.log("✅ Local LAN reached! Switching to 0-latency mode.");
-           // Find the index of the LAN device
-           const lanIdx = devices.findIndex(d => d.ip === data.lan_ip);
-           if (lanIdx !== -1) {
-             // @ts-ignore
-             globalThis.connectToPC(lanIdx);
-             return;
-           }
-         }
-       } catch (e: any) {
-         console.log(`⚠️  Local LAN probe failed (${e.message}). Falling back to Cloud Tunnel.`);
-         console.log(`[DEBUG] Error details:`, e);
-       }
+    // Try each available IP for a zero-latency direct connection, fall back to tunnel
+    const proto = data.ssl_active ? "https" : "http";
+    const port = data.port || 8000;
+
+    for (const ip of allIps) {
+      if (!ip || ip === HUB_HOSTNAME) continue;
+      console.log(`🔍 Probing LAN IP ${ip} for zero-latency connection...`);
+      try {
+        const lanUrl = `${proto}://${ip}:${port}/api/ping`;
+        const probe = await fetch(lanUrl, {
+          signal: AbortSignal.timeout(1500),
+          headers: { 'Accept': 'application/json' }
+        });
+        if (probe.ok) {
+          console.log(`✅ Local LAN reached at ${ip}! Switching to 0-latency mode.`);
+          const lanIdx = devices.findIndex(d => d.ip === ip);
+          if (lanIdx !== -1) {
+            // @ts-ignore
+            globalThis.connectToPC(lanIdx);
+            return;
+          }
+        }
+      } catch (e: any) {
+        console.log(`⚠️  LAN probe failed for ${ip}: ${e.message}`);
+      }
     }
 
     // Fallback: find Hub (Primary) by hostname and connect to it
@@ -916,6 +915,7 @@ async function startApp() {
     globalThis.connectToPC(primaryIdx !== -1 ? primaryIdx : 0);
   }
 }
+
 
 // ============================================================
 // AUTO-CONNECT (Returning Users)

@@ -2,6 +2,7 @@ from __future__ import annotations
 import subprocess
 
 import asyncio
+import sys
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 from contextlib import asynccontextmanager
@@ -1185,15 +1186,20 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
 
     @app.get("/api/hub/info")
     async def get_hub_info():
+        lan = detect_lan_ip()
+        all_ips = detect_lan_ip(all_ips=True)
         return {
             "hostname": app.state.friendly_name,
             "hub_id": f"GL-HUB-{platform.node()}",
-            "local_ip": detect_lan_ip(),
+            "local_ip": lan,
+            "lan_ip": lan,       # mobile frontend expects 'lan_ip'
+            "all_ips": all_ips,  # all available LAN IPs (hotspot, wifi, ethernet)
             "port": port,
             "cloudflare_url": getattr(app.state, "cloudflare_url", None),
             "ssl_active": CERT_PEM.exists(),
             "pin": tokens.current_pin
         }
+
 
     @app.post("/api/hub/shutdown")
     async def hub_shutdown():
