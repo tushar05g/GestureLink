@@ -1688,18 +1688,31 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
             elif mtype == "camera_toggle":
                 active = data.get("active", False)
                 try:
-                    if active:
-                        if not app.state.vision.is_running:
-                            app.state.vision.start()
-                            logger.info("Camera started via WS/WebRTC")
-                    else:
-                        if app.state.vision.is_running:
-                            app.state.vision.stop()
-                            logger.info("Camera stopped via WS/WebRTC")
+                    if active and not app.state.camera_active:
+                        app.state.camera_active = True
+                        app.state.camera_task = asyncio.create_task(_hub_camera_loop())
+                        logger.info("Camera started via WS/WebRTC")
+                    elif not active:
+                        app.state.camera_active = False
+                        logger.info("Camera stopped via WS/WebRTC")
                     if responder:
-                        await responder.send_json({"status": "CAMERA_TOGGLED", "active": app.state.vision.is_running})
+                        await responder.send_json({
+                            "type": "camera_status_result", 
+                            "status": "starting" if active else "inactive", 
+                            "active": active
+                        })
                 except Exception as e:
                     logger.error("Camera toggle error: %s", e)
+            elif mtype == "camera_status":
+                if responder:
+                    is_active = getattr(app.state, "camera_active", False)
+                    # Use global hub_camera_active if available
+                    is_running = hub_camera_active
+                    await responder.send_json({
+                        "type": "camera_status_result",
+                        "status": "active" if is_running else "starting" if is_active else "inactive",
+                        "active": is_running or is_active
+                    })
         except Exception as e:
             logger.error("WS Message Error: %s", e)
 
