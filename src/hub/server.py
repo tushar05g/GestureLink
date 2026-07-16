@@ -2,6 +2,8 @@ from __future__ import annotations
 import subprocess
 
 import asyncio
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 from contextlib import asynccontextmanager
 import sys
 import os
@@ -533,6 +535,24 @@ def build_app(host: str = "0.0.0.0", port: int = 8000) -> FastAPI:
     @app.get("/api/connected-clients")
     async def get_connected_clients() -> JSONResponse:
         return JSONResponse({"clients": list(connected_clients.values())})
+
+    @app.post("/api/hub/webrtc-client/connect")
+    async def api_hub_webrtc_connect(payload: dict) -> JSONResponse:
+        client_id = payload.get("ip")
+        if client_id:
+            connected_clients[client_id] = {
+                "ip": client_id,
+                "connected_at": int(time.time()),
+                "type": "mobile (webrtc)"
+            }
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/hub/webrtc-client/disconnect")
+    async def api_hub_webrtc_disconnect(payload: dict) -> JSONResponse:
+        client_id = payload.get("ip")
+        if client_id:
+            connected_clients.pop(client_id, None)
+        return JSONResponse({"ok": True})
 
     @app.post("/api/hub/camera/flip")
     async def flip_hub_camera():

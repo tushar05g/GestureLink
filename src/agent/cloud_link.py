@@ -48,6 +48,22 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
     pc.frac_x = 0.0
     pc.frac_y = 0.0
 
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        logging.info(f"WebRTC Connection state is {pc.connectionState}")
+        if pc.connectionState in ["failed", "closed", "disconnected"]:
+            async with httpx.AsyncClient() as client:
+                try:
+                    await client.post("http://127.0.0.1:8000/api/hub/webrtc-client/disconnect", json={"ip": f"webrtc-{uid}"})
+                except Exception:
+                    pass
+        elif pc.connectionState == "connected":
+            async with httpx.AsyncClient() as client:
+                try:
+                    await client.post("http://127.0.0.1:8000/api/hub/webrtc-client/connect", json={"ip": f"webrtc-{uid}"})
+                except Exception:
+                    pass
+
     @pc.on("datachannel")
     def on_datachannel(channel):
         logging.info(f"Data channel {channel.label} established with Hub")
@@ -85,6 +101,29 @@ async def handle_webrtc_offer(offer_data, uid, agent_id, mouse):
                         key = data.get("key")
                         if key:
                             pyautogui.press(key, _pause=False)
+                    elif mtype == "camera_toggle":
+                        active = data.get("active", False)
+                        async def _toggle():
+                            async with httpx.AsyncClient() as client:
+                                try:
+                                    await client.post(f"http://127.0.0.1:8000/api/hub/camera/toggle?active={'true' if active else 'false'}")
+                                except Exception as e:
+                                    logging.error(f"Failed to relay camera toggle: {e}")
+                        asyncio.create_task(_toggle())
+                    elif mtype == "camera_status":
+                        async def _status():
+                            async with httpx.AsyncClient() as client:
+                                try:
+                                    res = await client.get("http://127.0.0.1:8000/api/hub/camera/status")
+                                    status_data = res.json()
+                                    channel.send(json.dumps({
+                                        "type": "camera_status_result",
+                                        "ok": status_data.get("ok", False),
+                                        "active": status_data.get("active", False)
+                                    }))
+                                except Exception as e:
+                                    logging.error(f"Failed to fetch camera status: {e}")
+                        asyncio.create_task(_status())
                     elif mtype == "hotkey":
                         keys = data.get("keys", [])
                         if keys:
